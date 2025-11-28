@@ -16,6 +16,7 @@ SPARK_MASTER_URL = os.getenv('SPARK_MASTER_URL', 'local[*]')
 SPARK_DRIVER_MEMORY = os.getenv('SPARK_DRIVER_MEMORY', '2g')
 SPARK_EXECUTOR_MEMORY = os.getenv('SPARK_EXECUTOR_MEMORY', '2g')
 DELTA_LAKE_PATH = os.getenv('DELTA_LAKE_PATH', '/data/lakehouse')
+QUERY_ROW_LIMIT = int(os.getenv('QUERY_ROW_LIMIT', '1000'))
 
 # Global Spark session (lazy initialization)
 _spark_session = None
@@ -65,7 +66,7 @@ def execute_query():
         columns = result.columns
         
         data_rows = []
-        for row in rows[:1000]:  # Limit to 1000 rows
+        for row in rows[:QUERY_ROW_LIMIT]:  # Limit rows based on config
             data_rows.append({col: row[col] for col in columns})
         
         return jsonify({
@@ -73,7 +74,7 @@ def execute_query():
             'columns': columns,
             'data': data_rows,
             'row_count': len(data_rows),
-            'truncated': len(rows) > 1000
+            'truncated': len(rows) > QUERY_ROW_LIMIT
         })
         
     except Exception as e:

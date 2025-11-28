@@ -25,4 +25,5 @@ WORKDIR /home/jovyan/work
 
 EXPOSE 8888
 
-CMD ["start-notebook.sh", "--NotebookApp.token=${JUPYTER_TOKEN:-openbricks}"]
+# Token is passed via environment variable JUPYTER_TOKEN at runtime
+CMD ["start-notebook.sh"]

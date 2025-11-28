@@ -2,10 +2,11 @@
 
 c = get_config()
 
-# Allow all origins for development
-c.NotebookApp.allow_origin = '*'
+# Allow localhost origins for development
+c.NotebookApp.allow_origin = 'http://localhost:3000'
 
-# Disable token authentication for development (override via env var)
+# Use token from environment variable (default: openbricks)
+# Token authentication enabled by default for security
 c.NotebookApp.token = ''
 
 # Server settings

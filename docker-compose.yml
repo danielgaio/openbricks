@@ -10,7 +10,7 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - JWT_SECRET=${JWT_SECRET:-openbricks-dev-secret}
       - AUTH_SERVICE_URL=http://auth:8081
-      - QUERY_ENGINE_URL=http://query-engine:4040
+      - QUERY_ENGINE_URL=http://query-engine:5000
       - STORAGE_SERVICE_URL=http://storage:9000
     depends_on:
       - auth

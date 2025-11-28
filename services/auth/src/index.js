@@ -4,11 +4,21 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 8081;
 const JWT_SECRET = process.env.JWT_SECRET || 'openbricks-dev-secret';
 const JWT_EXPIRY = parseInt(process.env.JWT_EXPIRY) || 3600;
+
+// Rate limiter for authentication endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: { error: 'Too many requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // Middleware
 app.use(helmet());
@@ -16,7 +26,9 @@ app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json());
 
-// In-memory user store (replace with database in production)
+// In-memory user store for development
+// NOTE: This is intended for development/testing only.
+// For production, implement database persistence with PostgreSQL.
 const users = new Map();
 
 // Health check endpoint
@@ -25,7 +37,7 @@ app.get('/health', (req, res) => {
 });
 
 // Register endpoint
-app.post('/register', async (req, res) => {
+app.post('/register', authLimiter, async (req, res) => {
   try {
     const { email, password, name } = req.body;
 
@@ -65,7 +77,7 @@ app.post('/register', async (req, res) => {
 });
 
 // Login endpoint
-app.post('/login', async (req, res) => {
+app.post('/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -100,7 +112,7 @@ app.post('/login', async (req, res) => {
 });
 
 // Verify token endpoint
-app.post('/verify', (req, res) => {
+app.post('/verify', authLimiter, (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
