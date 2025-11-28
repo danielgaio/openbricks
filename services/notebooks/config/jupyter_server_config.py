@@ -8,11 +8,26 @@ c.ServerApp.open_browser = False
 c.ServerApp.allow_origin = '*'
 c.ServerApp.allow_root = True
 
-# No authentication for development (configure in production)
+# ============================================================================
+# SECURITY WARNING: Development-only settings below
+# ============================================================================
+# The following settings disable authentication for development purposes.
+# DO NOT use these settings in production!
+#
+# For production deployments:
+# 1. Set a secure token: c.ServerApp.token = 'your-secure-token'
+# 2. Or use password authentication: jupyter server password
+# 3. Enable XSRF protection: c.ServerApp.disable_check_xsrf = False
+# 4. Configure proper CORS: c.ServerApp.allow_origin = 'https://your-domain.com'
+#
+# See: https://jupyter-server.readthedocs.io/en/latest/operators/security.html
+# ============================================================================
+
+# Development-only: Disable authentication (CHANGE IN PRODUCTION!)
 c.ServerApp.token = ''
 c.ServerApp.password = ''
 
-# Disable XSRF protection for API access (configure properly in production)
+# Development-only: Disable XSRF protection (CHANGE IN PRODUCTION!)
 c.ServerApp.disable_check_xsrf = True
 
 # Enable JupyterLab

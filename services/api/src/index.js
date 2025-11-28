@@ -7,6 +7,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg');
 const winston = require('winston');
 
@@ -31,11 +32,30 @@ const logger = winston.createLogger({
 const app = express();
 const PORT = process.env.PORT || 8000;
 
+// Rate limiting configuration
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: { error: 'Too many requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Stricter rate limit for authentication endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each IP to 10 auth requests per windowMs
+  message: { error: 'Too many authentication attempts, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Middleware
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(morgan('combined'));
+app.use(limiter); // Apply rate limiting to all requests
 
 // Database connection pool
 const pool = new Pool({
@@ -83,13 +103,13 @@ app.get('/api', (req, res) => {
 // API v1 Routes
 const apiRouter = express.Router();
 
-// Authentication routes
-apiRouter.post('/auth/login', async (req, res) => {
+// Authentication routes (with stricter rate limiting)
+apiRouter.post('/auth/login', authLimiter, async (req, res) => {
   // TODO: Implement authentication
   res.json({ message: 'Login endpoint - coming soon' });
 });
 
-apiRouter.post('/auth/register', async (req, res) => {
+apiRouter.post('/auth/register', authLimiter, async (req, res) => {
   // TODO: Implement registration
   res.json({ message: 'Register endpoint - coming soon' });
 });
