@@ -1,4 +1,4 @@
-import { PlayCircle, Plus, Pause, RotateCw, MoreVertical, Clock, CheckCircle, XCircle } from 'lucide-react'
+import { PlayCircle, Plus, Pause, RotateCw, MoreVertical, CheckCircle, XCircle } from 'lucide-react'
 
 const jobs = [
   { id: 1, name: 'Daily ETL Pipeline', schedule: '0 6 * * *', lastRun: '6:00 AM', nextRun: 'Tomorrow 6:00 AM', status: 'success', duration: '45m' },
