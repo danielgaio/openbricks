@@ -1,0 +1,181 @@
+/**
+ * API client for OpenBricks services
+ */
+
+const AUTH_SERVICE_URL = import.meta.env.VITE_AUTH_URL || 'http://localhost:8001';
+const API_SERVICE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+export interface User {
+  id: number;
+  email: string;
+  name: string;
+  role: string;
+  created_at: string;
+}
+
+export interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+export interface RegisterData {
+  email: string;
+  password: string;
+  name: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  expires_at: string;
+  user: User;
+}
+
+class ApiClient {
+  private token: string | null = null;
+
+  constructor() {
+    this.token = localStorage.getItem('token');
+  }
+
+  setToken(token: string | null) {
+    this.token = token;
+    if (token) {
+      localStorage.setItem('token', token);
+    } else {
+      localStorage.removeItem('token');
+    }
+  }
+
+  getToken(): string | null {
+    return this.token;
+  }
+
+  private async request<T>(
+    url: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    };
+
+    if (this.token) {
+      (headers as Record<string, string>)['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    const response = await fetch(url, {
+      ...options,
+      headers,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `HTTP error ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  // Auth endpoints
+  async login(credentials: LoginCredentials): Promise<AuthResponse> {
+    const response = await this.request<AuthResponse>(
+      `${AUTH_SERVICE_URL}/api/auth/login`,
+      {
+        method: 'POST',
+        body: JSON.stringify(credentials),
+      }
+    );
+    this.setToken(response.token);
+    return response;
+  }
+
+  async register(data: RegisterData): Promise<AuthResponse> {
+    const response = await this.request<AuthResponse>(
+      `${AUTH_SERVICE_URL}/api/auth/register`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+    this.setToken(response.token);
+    return response;
+  }
+
+  async verifyToken(): Promise<{ valid: boolean; user_id: number; email: string; role: string }> {
+    return this.request(`${AUTH_SERVICE_URL}/api/auth/verify`);
+  }
+
+  async refreshToken(): Promise<AuthResponse> {
+    const response = await this.request<AuthResponse>(
+      `${AUTH_SERVICE_URL}/api/auth/refresh`,
+      { method: 'POST' }
+    );
+    this.setToken(response.token);
+    return response;
+  }
+
+  logout() {
+    this.setToken(null);
+    localStorage.removeItem('user');
+  }
+
+  // API endpoints
+  async getWorkspaces() {
+    return this.request<{ workspaces: unknown[] }>(`${API_SERVICE_URL}/api/v1/workspaces`);
+  }
+
+  async createWorkspace(data: { name: string; description?: string }) {
+    return this.request(`${API_SERVICE_URL}/api/v1/workspaces`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getNotebooks() {
+    return this.request<{ notebooks: unknown[] }>(`${API_SERVICE_URL}/api/v1/notebooks`);
+  }
+
+  async createNotebook(data: { name: string; workspace_id: number; language?: string }) {
+    return this.request(`${API_SERVICE_URL}/api/v1/notebooks`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getJobs() {
+    return this.request<{ jobs: unknown[] }>(`${API_SERVICE_URL}/api/v1/jobs`);
+  }
+
+  async createJob(data: { name: string; notebook_id: number; schedule?: string }) {
+    return this.request(`${API_SERVICE_URL}/api/v1/jobs`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getClusters() {
+    return this.request<{ clusters: unknown[] }>(`${API_SERVICE_URL}/api/v1/clusters`);
+  }
+
+  async createCluster(data: { name: string; node_type?: string; num_workers?: number }) {
+    return this.request(`${API_SERVICE_URL}/api/v1/clusters`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getTables() {
+    return this.request<{ tables: unknown[] }>(`${API_SERVICE_URL}/api/v1/tables`);
+  }
+
+  // Health checks
+  async checkApiHealth() {
+    return this.request<{ status: string }>(`${API_SERVICE_URL}/health`);
+  }
+
+  async checkAuthHealth() {
+    return this.request<{ status: string }>(`${AUTH_SERVICE_URL}/health`);
+  }
+}
+
+export const api = new ApiClient();
