@@ -21,6 +21,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Check for existing session on mount
   useEffect(() => {
     const initAuth = async () => {
+      if (typeof window === 'undefined') {
+        setIsLoading(false);
+        return;
+      }
+
       const token = api.getToken();
       const storedUser = localStorage.getItem('user');
       
@@ -47,7 +52,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const response = await api.login(credentials);
       setUser(response.user);
-      localStorage.setItem('user', JSON.stringify(response.user));
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('user', JSON.stringify(response.user));
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Login failed';
       setError(message);
@@ -63,7 +70,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const response = await api.register(data);
       setUser(response.user);
-      localStorage.setItem('user', JSON.stringify(response.user));
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('user', JSON.stringify(response.user));
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Registration failed';
       setError(message);

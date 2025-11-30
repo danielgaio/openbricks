@@ -131,12 +131,15 @@ export default function Login() {
             </div>
           </div>
 
-          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <p className="text-xs text-gray-500 text-center">
-              <strong>Default credentials:</strong><br />
-              admin@openbricks.local / openbricks
-            </p>
-          </div>
+          {/* Only show default credentials in development */}
+          {import.meta.env.DEV && (
+            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+              <p className="text-xs text-gray-500 text-center">
+                <strong>Default credentials:</strong><br />
+                admin@openbricks.local / openbricks
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>
