@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from minio import Minio
@@ -43,6 +43,26 @@ DEFAULT_BUCKET = "openbricks-data"
 def get_db_connection():
     """Get database connection"""
     return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+
+
+async def get_current_user(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role")
+):
+    """
+    Extract user info from Gateway-injected headers.
+    In production, these headers should be trusted only if coming from the Gateway.
+    """
+    if not x_user_id:
+        # For development/testing without Gateway, or if Gateway fails to inject
+        # In a strict mode, we might raise HTTPException(401)
+        # For now, we'll allow it but log a warning if strict auth is expected
+        return None
+    
+    return {
+        "id": int(x_user_id),
+        "role": x_user_role
+    }
 
 
 @asynccontextmanager
@@ -260,15 +280,32 @@ async def delete_file(bucket_name: str, file_path: str):
 
 # Table management (Delta Lake catalog)
 @app.get("/api/storage/tables")
-async def list_tables(database: str = Query(default="default")):
+async def list_tables(
+    database: str = Query(default="default"),
+    user: Optional[dict] = Depends(get_current_user)
+):
     """List all Delta Lake tables"""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute(
-            "SELECT * FROM data_tables WHERE database = %s ORDER BY name",
-            (database,)
-        )
+        
+        query = "SELECT * FROM data_tables WHERE database = %s"
+        params = [database]
+        
+        # Filter by ownership if user is present and not admin
+        # Public tables are always visible
+        if user and user.get("role") != "admin":
+            query += " AND (owner_id = %s OR is_public = true)"
+            params.append(user["id"])
+        elif not user:
+            # If no user context (e.g. internal call or dev), show only public
+            # Or we could show everything if we assume internal network trust
+            # For now, let's be safe and show only public
+            query += " AND is_public = true"
+
+        query += " ORDER BY name"
+        
+        cur.execute(query, tuple(params))
         tables = cur.fetchall()
         conn.close()
         return {"tables": tables}
@@ -277,21 +314,26 @@ async def list_tables(database: str = Query(default="default")):
 
 
 @app.post("/api/storage/tables")
-async def create_table(table: TableCreate):
+async def create_table(
+    table: TableCreate,
+    user: Optional[dict] = Depends(get_current_user)
+):
     """Register a new Delta Lake table"""
     try:
         location = table.location or f"s3a://{DEFAULT_BUCKET}/tables/{table.database}/{table.name}"
+        owner_id = user["id"] if user else None
         
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO data_tables (name, database, format, location, schema_definition)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO data_tables (name, database, format, location, schema_definition, owner_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
             (table.name, table.database, table.format, location, 
-             psycopg2.extras.Json(table.schema_definition) if table.schema_definition else None)
+             psycopg2.extras.Json(table.schema_definition) if table.schema_definition else None,
+             owner_id)
         )
         new_table = cur.fetchone()
         conn.commit()
@@ -323,7 +365,11 @@ async def get_table(table_id: int):
 
 
 @app.delete("/api/storage/tables/{table_id}")
-async def delete_table(table_id: int, drop_data: bool = Query(default=False)):
+async def delete_table(
+    table_id: int, 
+    drop_data: bool = Query(default=False),
+    user: Optional[dict] = Depends(get_current_user)
+):
     """Delete a table from the catalog"""
     try:
         conn = get_db_connection()
@@ -337,6 +383,14 @@ async def delete_table(table_id: int, drop_data: bool = Query(default=False)):
             conn.close()
             raise HTTPException(status_code=404, detail="Table not found")
         
+        # Check ownership
+        if user:
+            is_admin = user.get("role") == "admin"
+            is_owner = table["owner_id"] == user["id"]
+            if not (is_admin or is_owner):
+                conn.close()
+                raise HTTPException(status_code=403, detail="Not authorized to delete this table")
+
         # Delete from catalog
         cur.execute("DELETE FROM data_tables WHERE id = %s", (table_id,))
         conn.commit()
@@ -344,8 +398,22 @@ async def delete_table(table_id: int, drop_data: bool = Query(default=False)):
         
         # Optionally drop data from storage
         if drop_data and table["location"]:
-            # TODO: Implement data deletion from MinIO/S3
-            pass
+            try:
+                # Parse location to get bucket and prefix
+                # Expected format: s3a://bucket/path/to/table
+                if table["location"].startswith("s3a://"):
+                    path_parts = table["location"].replace("s3a://", "").split("/", 1)
+                    if len(path_parts) == 2:
+                        bucket_name, prefix = path_parts
+                        # List and delete all objects in the prefix
+                        objects = minio_client.list_objects(bucket_name, prefix=prefix, recursive=True)
+                        for obj in objects:
+                            minio_client.remove_object(bucket_name, obj.object_name)
+                        # Also remove the directory marker if it exists
+                        minio_client.remove_object(bucket_name, prefix)
+            except Exception as e:
+                logger.error(f"Failed to delete data for table {table['name']}: {e}")
+                # We don't fail the request if data deletion fails, but we log it
         
         return {"message": f"Table '{table['name']}' deleted successfully"}
     except HTTPException:
