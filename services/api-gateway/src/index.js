@@ -3,6 +3,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const { createProxyMiddleware } = require("http-proxy-middleware");
+const { authenticateToken } = require("./middleware/auth");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -20,7 +21,9 @@ const QUERY_SERVICE_URL =
 app.use(helmet());
 app.use(cors());
 app.use(morgan("combined"));
-app.use(express.json());
+// Note: We do NOT use express.json() globally because it consumes the request body stream,
+// which breaks http-proxy-middleware for POST/PUT requests.
+// If the Gateway needs to parse body for its own endpoints, apply it specifically to those routes.
 
 // Health check endpoint
 app.get("/health", (req, res) => {
@@ -93,6 +96,7 @@ app.use(
 // API service proxy - handles workspaces, notebooks, jobs, clusters, tables
 app.use(
   "/api/v1",
+  authenticateToken,
   createProxyMiddleware({
     ...proxyOptions,
     target: API_SERVICE_URL,
@@ -105,6 +109,7 @@ app.use(
 // Storage service proxy - handles file operations and data catalog
 app.use(
   "/api/storage",
+  authenticateToken,
   createProxyMiddleware({
     ...proxyOptions,
     target: STORAGE_SERVICE_URL,
@@ -117,6 +122,7 @@ app.use(
 // Query engine proxy - handles Spark queries
 app.use(
   "/api/query",
+  authenticateToken,
   createProxyMiddleware({
     ...proxyOptions,
     target: QUERY_SERVICE_URL,

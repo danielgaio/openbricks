@@ -1,9 +1,11 @@
 /**
  * API client for OpenBricks services
+ * Defaults to using the API Gateway (port 8080)
  */
 
-const AUTH_SERVICE_URL = import.meta.env.VITE_AUTH_URL || 'http://localhost:8001';
-const API_SERVICE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
+const AUTH_SERVICE_URL = import.meta.env.VITE_AUTH_URL || GATEWAY_URL;
+const API_SERVICE_URL = import.meta.env.VITE_API_URL || `${GATEWAY_URL}/api/v1`;
 
 export interface User {
   id: number;
@@ -34,18 +36,18 @@ class ApiClient {
   private token: string | null = null;
 
   constructor() {
-    if (typeof window !== 'undefined') {
-      this.token = localStorage.getItem('token');
+    if (typeof window !== "undefined") {
+      this.token = localStorage.getItem("token");
     }
   }
 
   setToken(token: string | null) {
     this.token = token;
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       if (token) {
-        localStorage.setItem('token', token);
+        localStorage.setItem("token", token);
       } else {
-        localStorage.removeItem('token');
+        localStorage.removeItem("token");
       }
     }
   }
@@ -54,17 +56,16 @@ class ApiClient {
     return this.token;
   }
 
-  private async request<T>(
-    url: string,
-    options: RequestInit = {}
-  ): Promise<T> {
+  private async request<T>(url: string, options: RequestInit = {}): Promise<T> {
     const headers: HeadersInit = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...options.headers,
     };
 
     if (this.token) {
-      (headers as Record<string, string>)['Authorization'] = `Bearer ${this.token}`;
+      (headers as Record<string, string>)[
+        "Authorization"
+      ] = `Bearer ${this.token}`;
     }
 
     const response = await fetch(url, {
@@ -73,7 +74,9 @@ class ApiClient {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      const error = await response
+        .json()
+        .catch(() => ({ error: "Request failed" }));
       throw new Error(error.error || `HTTP error ${response.status}`);
     }
 
@@ -85,7 +88,7 @@ class ApiClient {
     const response = await this.request<AuthResponse>(
       `${AUTH_SERVICE_URL}/api/auth/login`,
       {
-        method: 'POST',
+        method: "POST",
         body: JSON.stringify(credentials),
       }
     );
@@ -97,7 +100,7 @@ class ApiClient {
     const response = await this.request<AuthResponse>(
       `${AUTH_SERVICE_URL}/api/auth/register`,
       {
-        method: 'POST',
+        method: "POST",
         body: JSON.stringify(data),
       }
     );
@@ -105,14 +108,19 @@ class ApiClient {
     return response;
   }
 
-  async verifyToken(): Promise<{ valid: boolean; user_id: number; email: string; role: string }> {
+  async verifyToken(): Promise<{
+    valid: boolean;
+    user_id: number;
+    email: string;
+    role: string;
+  }> {
     return this.request(`${AUTH_SERVICE_URL}/api/auth/verify`);
   }
 
   async refreshToken(): Promise<AuthResponse> {
     const response = await this.request<AuthResponse>(
       `${AUTH_SERVICE_URL}/api/auth/refresh`,
-      { method: 'POST' }
+      { method: "POST" }
     );
     this.setToken(response.token);
     return response;
@@ -120,30 +128,38 @@ class ApiClient {
 
   logout() {
     this.setToken(null);
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('user');
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("user");
     }
   }
 
   // API endpoints
   async getWorkspaces() {
-    return this.request<{ workspaces: unknown[] }>(`${API_SERVICE_URL}/api/v1/workspaces`);
+    return this.request<{ workspaces: unknown[] }>(
+      `${API_SERVICE_URL}/api/v1/workspaces`
+    );
   }
 
   async createWorkspace(data: { name: string; description?: string }) {
     return this.request(`${API_SERVICE_URL}/api/v1/workspaces`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async getNotebooks() {
-    return this.request<{ notebooks: unknown[] }>(`${API_SERVICE_URL}/api/v1/notebooks`);
+    return this.request<{ notebooks: unknown[] }>(
+      `${API_SERVICE_URL}/api/v1/notebooks`
+    );
   }
 
-  async createNotebook(data: { name: string; workspace_id: number; language?: string }) {
+  async createNotebook(data: {
+    name: string;
+    workspace_id: number;
+    language?: string;
+  }) {
     return this.request(`${API_SERVICE_URL}/api/v1/notebooks`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -152,26 +168,38 @@ class ApiClient {
     return this.request<{ jobs: unknown[] }>(`${API_SERVICE_URL}/api/v1/jobs`);
   }
 
-  async createJob(data: { name: string; notebook_id: number; schedule?: string }) {
+  async createJob(data: {
+    name: string;
+    notebook_id: number;
+    schedule?: string;
+  }) {
     return this.request(`${API_SERVICE_URL}/api/v1/jobs`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async getClusters() {
-    return this.request<{ clusters: unknown[] }>(`${API_SERVICE_URL}/api/v1/clusters`);
+    return this.request<{ clusters: unknown[] }>(
+      `${API_SERVICE_URL}/api/v1/clusters`
+    );
   }
 
-  async createCluster(data: { name: string; node_type?: string; num_workers?: number }) {
+  async createCluster(data: {
+    name: string;
+    node_type?: string;
+    num_workers?: number;
+  }) {
     return this.request(`${API_SERVICE_URL}/api/v1/clusters`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async getTables() {
-    return this.request<{ tables: unknown[] }>(`${API_SERVICE_URL}/api/v1/tables`);
+    return this.request<{ tables: unknown[] }>(
+      `${API_SERVICE_URL}/api/v1/tables`
+    );
   }
 
   // Health checks

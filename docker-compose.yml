@@ -167,6 +167,7 @@ services:
       AUTH_SERVICE_URL: http://auth-service:8001
       STORAGE_SERVICE_URL: http://storage-service:8002
       QUERY_SERVICE_URL: http://query-engine:8003
+      JWT_SECRET: ${JWT_SECRET:-change-this-secret-in-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "${API_GATEWAY_PORT:-8080}:8080"

@@ -15,6 +15,26 @@ const AUTH_SERVICE_URL =
  */
 async function authenticateToken(req, res, next) {
   try {
+    // Optimization: Check if request comes from Gateway with verified user headers
+    // This avoids an extra HTTP call to Auth Service
+    const gatewayUserId = req.headers["x-user-id"];
+    const gatewayUserEmail = req.headers["x-user-email"];
+    const gatewayUserRole = req.headers["x-user-role"];
+
+    if (gatewayUserId && gatewayUserEmail && gatewayUserRole) {
+      req.user = {
+        id: parseInt(gatewayUserId),
+        email: gatewayUserEmail,
+        role: gatewayUserRole,
+      };
+      // Still extract token for downstream calls if needed
+      const authHeader = req.headers["authorization"];
+      if (authHeader) {
+        req.token = authHeader.split(" ")[1];
+      }
+      return next();
+    }
+
     // Extract token from Authorization header
     const authHeader = req.headers["authorization"];
     const token = authHeader && authHeader.split(" ")[1]; // Bearer TOKEN
