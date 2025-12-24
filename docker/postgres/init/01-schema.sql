@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS data_tables (
     format VARCHAR(50) DEFAULT 'delta',
     location TEXT,
     schema_definition JSONB,
+    is_public BOOLEAN DEFAULT false,
     owner_id INTEGER REFERENCES users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

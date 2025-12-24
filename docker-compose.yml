@@ -1,0 +1,337 @@
+version: "3.9"
+
+# OpenBricks Platform - Docker Compose Configuration
+# This orchestrates all microservices for local development
+
+networks:
+  openbricks-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+    driver: local
+  minio-data:
+    driver: local
+  notebooks-data:
+    driver: local
+  spark-data:
+    driver: local
+
+services:
+  # ================================
+  # Data Layer
+  # ================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: openbricks-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-openbricks}
+      POSTGRES_USER: ${POSTGRES_USER:-openbricks}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openbricks}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - openbricks-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openbricks}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: openbricks-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-openbricks}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-openbricks123}
+    volumes:
+      - minio-data:/data
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    networks:
+      - openbricks-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ================================
+  # Core Services
+  # ================================
+
+  auth-service:
+    build:
+      context: ./services/auth
+      dockerfile: Dockerfile
+    container_name: openbricks-auth
+    environment:
+      PORT: 8001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-openbricks}:${POSTGRES_PASSWORD:-openbricks}@postgres:5432/${POSTGRES_DB:-openbricks}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:-change-this-secret-in-production}
+      JWT_EXPIRY: ${JWT_EXPIRY:-86400}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${AUTH_SERVICE_PORT:-8001}:8001"
+    networks:
+      - openbricks-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  api-service:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    container_name: openbricks-api
+    environment:
+      PORT: 8000
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-openbricks}:${POSTGRES_PASSWORD:-openbricks}@postgres:5432/${POSTGRES_DB:-openbricks}
+      AUTH_SERVICE_URL: http://auth-service:8001
+      STORAGE_SERVICE_URL: http://storage-service:8002
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-openbricks}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-openbricks123}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${API_SERVICE_PORT:-8000}:8000"
+    networks:
+      - openbricks-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  storage-service:
+    build:
+      context: ./services/storage
+      dockerfile: Dockerfile
+    container_name: openbricks-storage
+    environment:
+      PORT: 8002
+      DATABASE_URL: postgresql://${POSTGRES_USER:-openbricks}:${POSTGRES_PASSWORD:-openbricks}@postgres:5432/${POSTGRES_DB:-openbricks}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-openbricks}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-openbricks123}
+      SPARK_MASTER_URL: spark://spark-master:7077
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${STORAGE_SERVICE_PORT:-8002}:8002"
+    networks:
+      - openbricks-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: openbricks-gateway
+    environment:
+      PORT: 8080
+      API_SERVICE_URL: http://api-service:8000
+      AUTH_SERVICE_URL: http://auth-service:8001
+      STORAGE_SERVICE_URL: http://storage-service:8002
+      QUERY_SERVICE_URL: http://query-engine:8003
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${API_GATEWAY_PORT:-8080}:8080"
+    networks:
+      - openbricks-network
+    depends_on:
+      - auth-service
+      - api-service
+      - storage-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ================================
+  # Frontend Services
+  # ================================
+
+  dashboard:
+    build:
+      context: ./services/dashboard
+      dockerfile: Dockerfile
+      target: development
+    container_name: openbricks-dashboard
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
+      VITE_AUTH_URL: ${VITE_AUTH_URL:-http://localhost:8001}
+    ports:
+      - "${DASHBOARD_PORT:-3000}:80"
+    networks:
+      - openbricks-network
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
+  studio:
+    build:
+      context: ./services/studio
+      dockerfile: Dockerfile
+    container_name: openbricks-studio
+    environment:
+      API_URL: ${API_URL:-http://api-gateway:8080}
+      AUTH_URL: ${AUTH_URL:-http://auth-service:8001}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3001}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change-this-secret}
+    ports:
+      - "${STUDIO_PORT:-3001}:3000"
+    networks:
+      - openbricks-network
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
+  # ================================
+  # Query & Analytics Layer
+  # ================================
+
+  spark-master:
+    image: bitnami/spark:3.5
+    container_name: openbricks-spark-master
+    environment:
+      SPARK_MODE: master
+      SPARK_RPC_AUTHENTICATION_ENABLED: no
+      SPARK_RPC_ENCRYPTION_ENABLED: no
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: no
+      SPARK_SSL_ENABLED: no
+      SPARK_MASTER_OPTS: "-Dspark.deploy.defaultCores=2"
+    ports:
+      - "${SPARK_MASTER_PORT:-7077}:7077"
+      - "${SPARK_MASTER_UI_PORT:-8081}:8080"
+    networks:
+      - openbricks-network
+    volumes:
+      - spark-data:/opt/bitnami/spark/data
+    restart: unless-stopped
+
+  spark-worker-1:
+    image: bitnami/spark:3.5
+    container_name: openbricks-spark-worker-1
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-2G}
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
+      SPARK_RPC_AUTHENTICATION_ENABLED: no
+      SPARK_RPC_ENCRYPTION_ENABLED: no
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: no
+      SPARK_SSL_ENABLED: no
+    networks:
+      - openbricks-network
+    depends_on:
+      - spark-master
+    volumes:
+      - spark-data:/opt/bitnami/spark/data
+    restart: unless-stopped
+
+  query-engine:
+    build:
+      context: ./services/query-engine
+      dockerfile: Dockerfile
+    container_name: openbricks-query-engine
+    environment:
+      PORT: 8003
+      SPARK_MASTER_URL: spark://spark-master:7077
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-openbricks}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-openbricks123}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-openbricks}:${POSTGRES_PASSWORD:-openbricks}@postgres:5432/${POSTGRES_DB:-openbricks}
+    ports:
+      - "${QUERY_ENGINE_PORT:-8003}:8003"
+    networks:
+      - openbricks-network
+    depends_on:
+      - spark-master
+      - minio
+      - postgres
+    restart: unless-stopped
+
+  # ================================
+  # Notebooks & Interactive Computing
+  # ================================
+
+  notebooks:
+    image: jupyter/pyspark-notebook:latest
+    container_name: openbricks-notebooks
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+      GRANT_SUDO: "yes"
+      SPARK_MASTER: spark://spark-master:7077
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-openbricks}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-openbricks123}
+    ports:
+      - "${NOTEBOOKS_PORT:-8888}:8888"
+    networks:
+      - openbricks-network
+    volumes:
+      - notebooks-data:/home/jovyan/work
+      - ./services/notebooks/config:/home/jovyan/.jupyter:ro
+    depends_on:
+      - spark-master
+      - minio
+    restart: unless-stopped
+
+  workspace:
+    build:
+      context: ./services/workspace
+      dockerfile: Dockerfile
+    container_name: openbricks-workspace
+    environment:
+      SPARK_MASTER: spark://spark-master:7077
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-openbricks}:${POSTGRES_PASSWORD:-openbricks}@postgres:5432/${POSTGRES_DB:-openbricks}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-openbricks}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-openbricks123}
+    ports:
+      - "${WORKSPACE_PORT:-8889}:8888"
+    networks:
+      - openbricks-network
+    volumes:
+      - notebooks-data:/workspace
+    depends_on:
+      - spark-master
+      - postgres
+      - minio
+    restart: unless-stopped
