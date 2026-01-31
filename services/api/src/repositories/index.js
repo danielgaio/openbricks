@@ -8,6 +8,7 @@ const { BaseRepository } = require("./BaseRepository");
 const { WorkspaceRepository } = require("./WorkspaceRepository");
 const { NotebookRepository } = require("./NotebookRepository");
 const { JobRepository } = require("./JobRepository");
+const { JobRunRepository } = require("./JobRunRepository");
 const { ClusterRepository } = require("./ClusterRepository");
 const { TableRepository } = require("./TableRepository");
 
@@ -21,6 +22,7 @@ function createRepositories(pool) {
     workspaces: new WorkspaceRepository(pool),
     notebooks: new NotebookRepository(pool),
     jobs: new JobRepository(pool),
+    jobRuns: new JobRunRepository(pool),
     clusters: new ClusterRepository(pool),
     tables: new TableRepository(pool),
   };
@@ -31,6 +33,7 @@ module.exports = {
   WorkspaceRepository,
   NotebookRepository,
   JobRepository,
+  JobRunRepository,
   ClusterRepository,
   TableRepository,
   createRepositories,

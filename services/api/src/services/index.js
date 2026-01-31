@@ -7,6 +7,7 @@ const { BaseService } = require("./BaseService");
 const { WorkspaceService } = require("./WorkspaceService");
 const { NotebookService } = require("./NotebookService");
 const { JobService } = require("./JobService");
+const { JobRunService } = require("./JobRunService");
 const { ClusterService } = require("./ClusterService");
 const { TableService } = require("./TableService");
 const { AuditService } = require("./AuditService");
@@ -22,6 +23,7 @@ function createServices(repositories, options = {}) {
     workspaces: new WorkspaceService(repositories, options),
     notebooks: new NotebookService(repositories, options),
     jobs: new JobService(repositories, options),
+    jobRuns: new JobRunService(repositories, options),
     clusters: new ClusterService(repositories, options),
     tables: new TableService(repositories, options),
     audit: new AuditService(repositories, options),
@@ -33,6 +35,7 @@ module.exports = {
   WorkspaceService,
   NotebookService,
   JobService,
+  JobRunService,
   ClusterService,
   TableService,
   AuditService,

@@ -20,6 +20,7 @@ const {
   NotebooksListDTO,
 } = require("./NotebookDTO");
 const { JobDTO, JobDetailDTO, JobsListDTO, JobRunDTO } = require("./JobDTO");
+const { JobRunStatsDTO } = require("./JobRunDTO");
 const {
   ClusterDTO,
   ClusterDetailDTO,
@@ -53,6 +54,7 @@ module.exports = {
   JobDetailDTO,
   JobsListDTO,
   JobRunDTO,
+  JobRunStatsDTO,
 
   // Cluster DTOs
   ClusterDTO,

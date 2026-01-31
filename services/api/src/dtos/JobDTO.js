@@ -4,6 +4,7 @@
  */
 
 const { UserDTO } = require("./UserDTO");
+const { JobRunDTO } = require("./JobRunDTO");
 
 /**
  * Job status display mapping
@@ -93,28 +94,6 @@ class JobDetailDTO extends JobDTO {
     }
 
     return dto;
-  }
-}
-
-/**
- * Job run representation
- */
-class JobRunDTO {
-  static fromEntity(run) {
-    if (!run) return null;
-
-    return {
-      id: run.id,
-      status: run.status,
-      started_at: run.started_at,
-      ended_at: run.ended_at || null,
-      duration_seconds: run.duration_seconds || null,
-      error_message: run.error_message || null,
-    };
-  }
-
-  static fromEntities(runs) {
-    return (runs || []).map((run) => JobRunDTO.fromEntity(run));
   }
 }
 

@@ -7,6 +7,7 @@ const {
   WorkspaceService,
   NotebookService,
   JobService,
+  JobRunService,
   ClusterService,
   TableService,
   createServices,
@@ -61,6 +62,17 @@ describe("Service Layer", () => {
         delete: jest.fn(),
         canAccess: jest.fn(),
         count: jest.fn(),
+      },
+      jobRuns: {
+        create: jest.fn(),
+        findByJobId: jest.fn(),
+        findLatestByJobId: jest.fn(),
+        complete: jest.fn(),
+        fail: jest.fn(),
+        cancel: jest.fn(),
+        findRunning: jest.fn(),
+        getStatsByJobId: jest.fn(),
+        cleanup: jest.fn(),
       },
       clusters: {
         findAll: jest.fn(),
@@ -487,6 +499,167 @@ describe("Service Layer", () => {
   });
 
   // ============================================
+  // JobRunService Tests
+  // ============================================
+  describe("JobRunService", () => {
+    let service;
+
+    beforeEach(() => {
+      service = new JobRunService(mockRepositories, { logger: mockLogger });
+    });
+
+    describe("startRun", () => {
+      it("should create a new run record", async () => {
+        const mockJob = { id: 1, name: "Test Job" };
+        const mockRun = {
+          id: 1,
+          job_id: 1,
+          status: "running",
+          started_at: new Date(),
+        };
+
+        mockRepositories.jobs.findById.mockResolvedValue(mockJob);
+        mockRepositories.jobRuns.create.mockResolvedValue(mockRun);
+
+        const result = await service.startRun(1);
+
+        expect(result).toEqual(mockRun);
+        expect(mockRepositories.jobRuns.create).toHaveBeenCalledWith({
+          job_id: 1,
+          status: "running",
+        });
+      });
+
+      it("should throw if job not found", async () => {
+        mockRepositories.jobs.findById.mockResolvedValue(null);
+
+        await expect(service.startRun(999)).rejects.toThrow("Job not found");
+      });
+    });
+
+    describe("completeRun", () => {
+      it("should complete a run successfully", async () => {
+        const mockRun = {
+          id: 1,
+          job_id: 1,
+          status: "completed",
+          ended_at: new Date(),
+          duration_seconds: 60,
+        };
+
+        mockRepositories.jobRuns.complete.mockResolvedValue(mockRun);
+        mockRepositories.jobs.update.mockResolvedValue({});
+
+        const result = await service.completeRun(1, "Output logs");
+
+        expect(result).toEqual(mockRun);
+        expect(mockRepositories.jobRuns.complete).toHaveBeenCalledWith(
+          1,
+          "Output logs",
+        );
+        expect(mockRepositories.jobs.update).toHaveBeenCalledWith(1, {
+          last_run_at: mockRun.ended_at,
+        });
+      });
+
+      it("should throw if run not found", async () => {
+        mockRepositories.jobRuns.complete.mockResolvedValue(null);
+
+        await expect(service.completeRun(999)).rejects.toThrow("Run not found");
+      });
+    });
+
+    describe("failRun", () => {
+      it("should mark a run as failed with error message", async () => {
+        const mockRun = {
+          id: 1,
+          job_id: 1,
+          status: "failed",
+          error_message: "Execution failed",
+          ended_at: new Date(),
+          duration_seconds: 30,
+        };
+
+        mockRepositories.jobRuns.fail.mockResolvedValue(mockRun);
+        mockRepositories.jobs.update.mockResolvedValue({});
+
+        const result = await service.failRun(1, "Execution failed");
+
+        expect(result).toEqual(mockRun);
+        expect(mockRepositories.jobRuns.fail).toHaveBeenCalledWith(
+          1,
+          "Execution failed",
+        );
+      });
+    });
+
+    describe("cancelRun", () => {
+      it("should cancel a running job run", async () => {
+        const mockRun = {
+          id: 1,
+          job_id: 1,
+          status: "cancelled",
+          ended_at: new Date(),
+        };
+
+        mockRepositories.jobRuns.cancel.mockResolvedValue(mockRun);
+
+        const result = await service.cancelRun(1);
+
+        expect(result).toEqual(mockRun);
+        expect(mockRepositories.jobRuns.cancel).toHaveBeenCalledWith(1);
+      });
+    });
+
+    describe("getRunsForJob", () => {
+      it("should return run history for a job", async () => {
+        const mockRuns = [
+          { id: 2, job_id: 1, status: "completed" },
+          { id: 1, job_id: 1, status: "failed" },
+        ];
+
+        mockRepositories.jobRuns.findByJobId.mockResolvedValue(mockRuns);
+
+        const result = await service.getRunsForJob(1, { limit: 10 });
+
+        expect(result).toEqual(mockRuns);
+        expect(mockRepositories.jobRuns.findByJobId).toHaveBeenCalledWith(1, {
+          limit: 10,
+        });
+      });
+    });
+
+    describe("getStatsForJob", () => {
+      it("should return run statistics", async () => {
+        const mockStats = {
+          total_runs: 10,
+          successful_runs: 8,
+          failed_runs: 2,
+          avg_duration_seconds: 45,
+          success_rate: 80,
+        };
+
+        mockRepositories.jobRuns.getStatsByJobId.mockResolvedValue(mockStats);
+
+        const result = await service.getStatsForJob(1);
+
+        expect(result).toEqual(mockStats);
+      });
+    });
+
+    describe("cleanupOldRuns", () => {
+      it("should cleanup old runs based on retention policy", async () => {
+        mockRepositories.jobRuns.cleanup.mockResolvedValue(5);
+
+        const result = await service.cleanupOldRuns(30);
+
+        expect(result).toBe(5);
+        expect(mockRepositories.jobRuns.cleanup).toHaveBeenCalledWith(30);
+      });
+    });
+  });
+
+  // ============================================
   // createServices Factory Tests
   // ============================================
   describe("createServices", () => {
@@ -496,6 +669,7 @@ describe("Service Layer", () => {
       expect(services.workspaces).toBeInstanceOf(WorkspaceService);
       expect(services.notebooks).toBeInstanceOf(NotebookService);
       expect(services.jobs).toBeInstanceOf(JobService);
+      expect(services.jobRuns).toBeInstanceOf(JobRunService);
       expect(services.clusters).toBeInstanceOf(ClusterService);
       expect(services.tables).toBeInstanceOf(TableService);
     });

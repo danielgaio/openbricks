@@ -29,6 +29,13 @@ const DomainEvents = {
   JOB_CANCELLED: "job.cancelled",
   JOB_STATUS_CHANGED: "job.status.changed",
 
+  // Job Run Events (execution tracking)
+  JOB_RUN_STARTED: "job.run.started",
+  JOB_RUN_COMPLETED: "job.run.completed",
+  JOB_RUN_FAILED: "job.run.failed",
+  JOB_RUN_CANCELLED: "job.run.cancelled",
+  JOB_RUNS_CLEANED_UP: "job.runs.cleaned_up",
+
   // Cluster Events
   CLUSTER_CREATED: "cluster.created",
   CLUSTER_UPDATED: "cluster.updated",

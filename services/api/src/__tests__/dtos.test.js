@@ -19,6 +19,7 @@ const {
   JobDTO,
   JobDetailDTO,
   JobRunDTO,
+  JobRunStatsDTO,
   ClusterDTO,
   ClusterDetailDTO,
   TableDTO,
@@ -268,6 +269,7 @@ describe("Job DTOs", () => {
     it("should transform job run", () => {
       const run = {
         id: 1,
+        job_id: 1,
         status: "completed",
         started_at: "2024-01-01T10:00:00Z",
         ended_at: "2024-01-01T10:05:00Z",
@@ -278,12 +280,96 @@ describe("Job DTOs", () => {
 
       expect(dto).toEqual({
         id: 1,
+        job_id: 1,
         status: "completed",
+        status_display: "Completed",
         started_at: "2024-01-01T10:00:00Z",
         ended_at: "2024-01-01T10:05:00Z",
         duration_seconds: 300,
-        error_message: null,
+        duration_display: "5m",
       });
+    });
+
+    it("should include error message only for failed runs", () => {
+      const failedRun = {
+        id: 1,
+        job_id: 1,
+        status: "failed",
+        started_at: "2024-01-01T10:00:00Z",
+        ended_at: "2024-01-01T10:01:00Z",
+        duration_seconds: 60,
+        error_message: "Execution failed",
+      };
+      const dto = JobRunDTO.fromEntity(failedRun);
+
+      expect(dto.error_message).toBe("Execution failed");
+
+      // Completed runs shouldn't show error
+      const completedRun = { ...failedRun, status: "completed" };
+      const completedDto = JobRunDTO.fromEntity(completedRun);
+      expect(completedDto.error_message).toBeUndefined();
+    });
+
+    it("should format duration in seconds", () => {
+      expect(JobRunDTO.formatDuration(30)).toBe("30s");
+    });
+
+    it("should format duration in minutes", () => {
+      expect(JobRunDTO.formatDuration(90)).toBe("1m 30s");
+      expect(JobRunDTO.formatDuration(120)).toBe("2m");
+    });
+
+    it("should format duration in hours", () => {
+      expect(JobRunDTO.formatDuration(3700)).toBe("1h 1m");
+      expect(JobRunDTO.formatDuration(7200)).toBe("2h");
+    });
+  });
+
+  describe("JobRunStatsDTO", () => {
+    it("should transform job run statistics", () => {
+      const stats = {
+        total_runs: 10,
+        successful_runs: 8,
+        failed_runs: 1,
+        cancelled_runs: 1,
+        avg_duration_seconds: 120,
+        success_rate: 80,
+        last_run_at: "2024-01-01T10:00:00Z",
+      };
+      const dto = JobRunStatsDTO.fromEntity(stats);
+
+      expect(dto).toEqual({
+        total_runs: 10,
+        successful_runs: 8,
+        failed_runs: 1,
+        cancelled_runs: 1,
+        success_rate: "80%",
+        success_rate_value: 80,
+        avg_duration_seconds: 120,
+        avg_duration_display: "2m",
+        last_run_at: "2024-01-01T10:00:00Z",
+      });
+    });
+
+    it("should handle null statistics", () => {
+      expect(JobRunStatsDTO.fromEntity(null)).toBeNull();
+    });
+
+    it("should handle empty statistics", () => {
+      const stats = {
+        total_runs: 0,
+        successful_runs: 0,
+        failed_runs: 0,
+        cancelled_runs: 0,
+        avg_duration_seconds: null,
+        success_rate: null,
+        last_run_at: null,
+      };
+      const dto = JobRunStatsDTO.fromEntity(stats);
+
+      expect(dto.total_runs).toBe(0);
+      expect(dto.success_rate).toBeNull();
+      expect(dto.avg_duration_display).toBeNull();
     });
   });
 });

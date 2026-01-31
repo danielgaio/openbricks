@@ -15,7 +15,7 @@ const {
 } = require("../utils/routeHelpers");
 const schemas = require("../schemas");
 const { authenticateToken } = require("../middleware/auth");
-const { JobDTO, JobDetailDTO } = require("../dtos");
+const { JobDTO, JobDetailDTO, JobRunDTO, JobRunStatsDTO } = require("../dtos");
 
 /**
  * Create job router
@@ -24,7 +24,7 @@ const { JobDTO, JobDetailDTO } = require("../dtos");
  */
 function createJobRoutes(services) {
   const router = express.Router();
-  const { jobs } = services;
+  const { jobs, jobRuns } = services;
 
   /**
    * GET /jobs - List jobs
@@ -150,6 +150,91 @@ function createJobRoutes(services) {
         return res.json({ message: "Job deleted successfully" });
       }
       handleResult(result, res);
+    }),
+  );
+
+  // ===========================================
+  // Job Run Routes (execution history)
+  // ===========================================
+
+  /**
+   * GET /jobs/:id/runs - Get run history for a job
+   */
+  router.get(
+    "/:id/runs",
+    authenticateToken,
+    schemas.jobs.getById,
+    asyncHandler(async (req, res) => {
+      const { limit, offset } = req.query;
+
+      // Verify job access first
+      const jobResult = await jobs.getById(req.params.id, req.user);
+      if (!jobResult.success) {
+        return handleResult(jobResult, res);
+      }
+
+      const runs = await jobRuns.getRunsForJob(req.params.id, {
+        limit: limit ? parseInt(limit, 10) : 10,
+        offset: offset ? parseInt(offset, 10) : 0,
+      });
+
+      res.json({
+        runs: JobRunDTO.fromEntities(runs),
+        job_id: parseInt(req.params.id, 10),
+      });
+    }),
+  );
+
+  /**
+   * GET /jobs/:id/runs/stats - Get run statistics for a job
+   */
+  router.get(
+    "/:id/runs/stats",
+    authenticateToken,
+    schemas.jobs.getById,
+    asyncHandler(async (req, res) => {
+      // Verify job access first
+      const jobResult = await jobs.getById(req.params.id, req.user);
+      if (!jobResult.success) {
+        return handleResult(jobResult, res);
+      }
+
+      const stats = await jobRuns.getStatsForJob(req.params.id);
+
+      res.json({
+        stats: JobRunStatsDTO.fromEntity(stats),
+        job_id: parseInt(req.params.id, 10),
+      });
+    }),
+  );
+
+  /**
+   * GET /jobs/:id/runs/latest - Get the latest run for a job
+   */
+  router.get(
+    "/:id/runs/latest",
+    authenticateToken,
+    schemas.jobs.getById,
+    asyncHandler(async (req, res) => {
+      // Verify job access first
+      const jobResult = await jobs.getById(req.params.id, req.user);
+      if (!jobResult.success) {
+        return handleResult(jobResult, res);
+      }
+
+      const run = await jobRuns.getLatestRun(req.params.id);
+
+      if (!run) {
+        return res.status(404).json({
+          error: "Not Found",
+          message: "No runs found for this job",
+        });
+      }
+
+      res.json({
+        run: JobRunDTO.fromEntity(run, { includeOutput: true }),
+        job_id: parseInt(req.params.id, 10),
+      });
     }),
   );
 
