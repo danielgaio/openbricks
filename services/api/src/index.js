@@ -1,6 +1,11 @@
 /**
  * OpenBricks API Service
  * Main entry point for REST & GraphQL APIs
+ *
+ * Architecture:
+ * - Repository Pattern for data access abstraction
+ * - Modular route handlers with dependency injection
+ * - Centralized error handling and validation
  */
 
 const express = require("express");
@@ -11,22 +16,20 @@ const rateLimit = require("express-rate-limit");
 const { Pool } = require("pg");
 const winston = require("winston");
 
-// Middleware
-const {
-  authenticateToken,
-  requireRole,
-  requireOwnership,
-  optionalAuth,
-} = require("./middleware/auth");
+// Utilities - centralized error handling
+const { errorHandler, notFoundHandler } = require("./utils/errors");
 
-// Utilities - centralized error handling and validation
+// Repositories - data access layer
+const { createRepositories } = require("./repositories");
+
+// Routes - modular route handlers
 const {
-  asyncHandler,
-  errorHandler,
-  notFoundHandler,
-  errors,
-} = require("./utils/errors");
-const schemas = require("./schemas");
+  createWorkspaceRoutes,
+  createNotebookRoutes,
+  createJobRoutes,
+  createClusterRoutes,
+  createTableRoutes,
+} = require("./routes");
 
 // Initialize logger
 const logger = winston.createLogger({
@@ -86,6 +89,9 @@ const pool = new Pool({
     "postgresql://openbricks:openbricks@localhost:5432/openbricks",
 });
 
+// Initialize repositories with database pool
+const repositories = createRepositories(pool);
+
 // Health check endpoint
 app.get("/health", async (req, res) => {
   try {
@@ -131,250 +137,15 @@ const apiRouter = express.Router();
 // API Gateway will route /api/auth/* to auth-service
 
 // ============================================
-// Workspace Routes
+// Mount Modular Route Handlers
 // ============================================
 
-/**
- * GET /workspaces - List workspaces
- * Users see their own workspaces, admins see all
- */
-apiRouter.get(
-  "/workspaces",
-  authenticateToken,
-  asyncHandler(async (req, res) => {
-    const query =
-      req.user.role === "admin"
-        ? "SELECT * FROM workspaces ORDER BY created_at DESC"
-        : "SELECT * FROM workspaces WHERE owner_id = $1 ORDER BY created_at DESC";
-
-    const params = req.user.role === "admin" ? [] : [req.user.id];
-    const result = await pool.query(query, params);
-
-    res.json({ workspaces: result.rows });
-  }),
-);
-
-/**
- * POST /workspaces - Create a new workspace
- */
-apiRouter.post(
-  "/workspaces",
-  authenticateToken,
-  schemas.workspaces.create,
-  asyncHandler(async (req, res) => {
-    const { name, description } = req.body;
-
-    const result = await pool.query(
-      "INSERT INTO workspaces (name, description, owner_id) VALUES ($1, $2, $3) RETURNING *",
-      [name, description, req.user.id],
-    );
-
-    res.status(201).json({ workspace: result.rows[0] });
-  }),
-);
-
-// ============================================
-// Notebook Routes
-// ============================================
-
-/**
- * GET /notebooks - List notebooks
- */
-apiRouter.get(
-  "/notebooks",
-  authenticateToken,
-  asyncHandler(async (req, res) => {
-    const query =
-      req.user.role === "admin"
-        ? "SELECT * FROM notebooks ORDER BY updated_at DESC"
-        : "SELECT * FROM notebooks WHERE owner_id = $1 ORDER BY updated_at DESC";
-
-    const params = req.user.role === "admin" ? [] : [req.user.id];
-    const result = await pool.query(query, params);
-
-    res.json({ notebooks: result.rows });
-  }),
-);
-
-/**
- * POST /notebooks - Create a new notebook
- */
-apiRouter.post(
-  "/notebooks",
-  authenticateToken,
-  schemas.notebooks.create,
-  asyncHandler(async (req, res) => {
-    const { name, workspace_id, language = "python", content = "" } = req.body;
-
-    // Verify workspace access if workspace_id provided
-    if (workspace_id) {
-      const workspace = await pool.query(
-        "SELECT owner_id FROM workspaces WHERE id = $1",
-        [workspace_id],
-      );
-      if (workspace.rows.length === 0) {
-        throw errors.notFound("Workspace");
-      }
-      if (
-        req.user.role !== "admin" &&
-        workspace.rows[0].owner_id !== req.user.id
-      ) {
-        throw errors.forbidden("You do not have access to this workspace");
-      }
-    }
-
-    const result = await pool.query(
-      "INSERT INTO notebooks (name, workspace_id, language, content, owner_id) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-      [name, workspace_id, language, content, req.user.id],
-    );
-
-    res.status(201).json({ notebook: result.rows[0] });
-  }),
-);
-
-// ============================================
-// Job Routes
-// ============================================
-
-/**
- * GET /jobs - List jobs
- */
-apiRouter.get(
-  "/jobs",
-  authenticateToken,
-  asyncHandler(async (req, res) => {
-    const query =
-      req.user.role === "admin"
-        ? "SELECT * FROM jobs ORDER BY created_at DESC"
-        : `SELECT j.* FROM jobs j 
-           JOIN notebooks n ON j.notebook_id = n.id 
-           WHERE n.owner_id = $1 
-           ORDER BY j.created_at DESC`;
-
-    const params = req.user.role === "admin" ? [] : [req.user.id];
-    const result = await pool.query(query, params);
-
-    res.json({ jobs: result.rows });
-  }),
-);
-
-/**
- * POST /jobs - Create a new job
- */
-apiRouter.post(
-  "/jobs",
-  authenticateToken,
-  schemas.jobs.create,
-  asyncHandler(async (req, res) => {
-    const { name, notebook_id, schedule } = req.body;
-
-    // Verify user owns the notebook
-    const notebook = await pool.query(
-      "SELECT owner_id FROM notebooks WHERE id = $1",
-      [notebook_id],
-    );
-
-    if (notebook.rows.length === 0) {
-      throw errors.notFound("Notebook");
-    }
-
-    if (
-      req.user.role !== "admin" &&
-      notebook.rows[0].owner_id !== req.user.id
-    ) {
-      throw errors.forbidden("You do not own this notebook");
-    }
-
-    const result = await pool.query(
-      "INSERT INTO jobs (name, notebook_id, schedule, status, owner_id) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-      [name, notebook_id, schedule, "pending", req.user.id],
-    );
-
-    res.status(201).json({ job: result.rows[0] });
-  }),
-);
-
-// ============================================
-// Table (Data Catalog) Routes
-// ============================================
-
-/**
- * GET /tables - List data tables
- * Public tables visible to all, private to owners/admins
- */
-apiRouter.get(
-  "/tables",
-  optionalAuth,
-  asyncHandler(async (req, res) => {
-    const query = req.user
-      ? req.user.role === "admin"
-        ? "SELECT * FROM data_tables ORDER BY created_at DESC"
-        : "SELECT * FROM data_tables WHERE is_public = true OR owner_id = $1 ORDER BY created_at DESC"
-      : "SELECT * FROM data_tables WHERE is_public = true ORDER BY created_at DESC";
-
-    const params = req.user && req.user.role !== "admin" ? [req.user.id] : [];
-    const result = await pool.query(query, params);
-
-    res.json({ tables: result.rows });
-  }),
-);
-
-// ============================================
-// Cluster Routes
-// ============================================
-
-/**
- * GET /clusters - List clusters
- */
-apiRouter.get(
-  "/clusters",
-  authenticateToken,
-  asyncHandler(async (req, res) => {
-    const result = await pool.query(
-      "SELECT * FROM clusters ORDER BY created_at DESC",
-    );
-    res.json({ clusters: result.rows });
-  }),
-);
-
-/**
- * POST /clusters - Create a new cluster (admin only)
- */
-apiRouter.post(
-  "/clusters",
-  authenticateToken,
-  requireRole("admin"),
-  schemas.clusters.create,
-  asyncHandler(async (req, res) => {
-    const {
-      name,
-      node_type = "standard",
-      num_workers = 1,
-      driver_memory = "2g",
-      executor_memory = "2g",
-      spark_version = "3.5.0",
-    } = req.body;
-
-    const result = await pool.query(
-      `INSERT INTO clusters 
-       (name, node_type, num_workers, driver_memory, executor_memory, spark_version, status, owner_id) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
-       RETURNING *`,
-      [
-        name,
-        node_type,
-        num_workers,
-        driver_memory,
-        executor_memory,
-        spark_version,
-        "pending",
-        req.user.id,
-      ],
-    );
-
-    res.status(201).json({ cluster: result.rows[0] });
-  }),
-);
+// Mount domain routes with repository injection
+apiRouter.use("/workspaces", createWorkspaceRoutes(repositories));
+apiRouter.use("/notebooks", createNotebookRoutes(repositories));
+apiRouter.use("/jobs", createJobRoutes(repositories));
+apiRouter.use("/clusters", createClusterRoutes(repositories));
+apiRouter.use("/tables", createTableRoutes(repositories));
 
 // ============================================
 // Mount Router & Error Handling
