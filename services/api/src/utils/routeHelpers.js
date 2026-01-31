@@ -1,6 +1,8 @@
 /**
  * Route Helpers
  * Shared utilities for route handlers
+ *
+ * Integrates with DTOs for Clean Architecture compliance
  */
 
 const { errors } = require("./errors");
@@ -15,6 +17,7 @@ const ERROR_MAP = {
   CONFLICT: (msg) => errors.conflict(msg || "Resource conflict"),
   DUPLICATE: (msg) => errors.duplicate(msg || "Resource"),
   VALIDATION: (msg) => errors.validation(msg || "Validation failed"),
+  INVALID_STATE: (msg) => errors.conflict(msg || "Invalid state"),
   INTERNAL: (msg) => errors.internal(msg || "Internal error"),
 };
 
@@ -93,9 +96,91 @@ function list(res, items, options = {}) {
   return res.json(response);
 }
 
+/**
+ * Handle service result with DTO transformation
+ * @param {Object} result - Service result { success, data?, error?, message? }
+ * @param {Object} res - Express response object
+ * @param {Object} options - Response options
+ * @param {Function} options.dto - DTO class with fromEntity method
+ * @param {boolean} options.detail - Use detailed DTO (fromEntityDetail)
+ * @param {number} options.successStatus - HTTP status for success (default: 200)
+ * @param {string} options.dataKey - Key name for data in response (default: 'data')
+ * @returns {Object} Express response
+ */
+function handleResultWithDTO(result, res, options = {}) {
+  const {
+    successStatus = 200,
+    dataKey = "data",
+    dto,
+    dtoOptions = {},
+  } = options;
+
+  if (result.success) {
+    const response = {};
+    if (result.data !== undefined) {
+      // Apply DTO transformation if provided
+      if (dto && typeof dto.fromEntity === "function") {
+        response[dataKey] = dto.fromEntity(result.data, dtoOptions);
+      } else {
+        response[dataKey] = result.data;
+      }
+    }
+    if (result.message) {
+      response.message = result.message;
+    }
+    return res.status(successStatus).json(response);
+  }
+
+  // Throw HTTP error based on error code
+  const errorFactory = ERROR_MAP[result.error];
+  if (errorFactory) {
+    throw errorFactory(result.message);
+  }
+
+  // Fallback to internal error
+  throw errors.internal(result.message || "Unknown error");
+}
+
+/**
+ * Handle list service result with DTO transformation
+ * @param {Object} result - Service result { success, data?, error?, message? }
+ * @param {Object} res - Express response object
+ * @param {Object} options - Response options
+ * @param {Function} options.dto - DTO class with fromEntities method
+ * @param {string} options.dataKey - Key name for data in response (default: 'items')
+ * @returns {Object} Express response
+ */
+function handleListWithDTO(result, res, options = {}) {
+  const { dataKey = "items", dto, dtoOptions = {} } = options;
+
+  if (result.success) {
+    const items = result.data || [];
+    const response = {};
+
+    // Apply DTO transformation if provided
+    if (dto && typeof dto.fromEntities === "function") {
+      response[dataKey] = dto.fromEntities(items, dtoOptions);
+    } else {
+      response[dataKey] = items;
+    }
+
+    return res.json(response);
+  }
+
+  // Throw HTTP error based on error code
+  const errorFactory = ERROR_MAP[result.error];
+  if (errorFactory) {
+    throw errorFactory(result.message);
+  }
+
+  throw errors.internal(result.message || "Unknown error");
+}
+
 module.exports = {
   ERROR_MAP,
   handleResult,
+  handleResultWithDTO,
+  handleListWithDTO,
   success,
   list,
 };

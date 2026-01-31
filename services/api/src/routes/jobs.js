@@ -2,13 +2,20 @@
  * Job Routes
  * RESTful endpoints for job scheduling
  * Routes are thin adapters that delegate to JobService
+ *
+ * Uses DTOs for response transformation (Clean Architecture)
  */
 
 const express = require("express");
 const { asyncHandler } = require("../utils/errors");
-const { handleResult } = require("../utils/routeHelpers");
+const {
+  handleResult,
+  handleResultWithDTO,
+  handleListWithDTO,
+} = require("../utils/routeHelpers");
 const schemas = require("../schemas");
 const { authenticateToken } = require("../middleware/auth");
+const { JobDTO, JobDetailDTO } = require("../dtos");
 
 /**
  * Create job router
@@ -34,10 +41,11 @@ function createJobRoutes(services) {
         offset: offset ? parseInt(offset, 10) : undefined,
       });
 
-      if (result.success) {
-        return res.json({ jobs: result.data });
-      }
-      handleResult(result, res);
+      // Transform through DTO
+      handleListWithDTO(result, res, {
+        dataKey: "jobs",
+        dto: JobDTO,
+      });
     }),
   );
 
@@ -50,7 +58,11 @@ function createJobRoutes(services) {
     schemas.jobs.getById,
     asyncHandler(async (req, res) => {
       const result = await jobs.getById(req.params.id, req.user);
-      handleResult(result, res, { dataKey: "job" });
+      // Use detailed DTO for single entity
+      handleResultWithDTO(result, res, {
+        dataKey: "job",
+        dto: JobDetailDTO,
+      });
     }),
   );
 
@@ -63,7 +75,11 @@ function createJobRoutes(services) {
     schemas.jobs.create,
     asyncHandler(async (req, res) => {
       const result = await jobs.create(req.body, req.user);
-      handleResult(result, res, { successStatus: 201, dataKey: "job" });
+      handleResultWithDTO(result, res, {
+        successStatus: 201,
+        dataKey: "job",
+        dto: JobDTO,
+      });
     }),
   );
 
@@ -76,7 +92,10 @@ function createJobRoutes(services) {
     schemas.jobs.update,
     asyncHandler(async (req, res) => {
       const result = await jobs.update(req.params.id, req.body, req.user);
-      handleResult(result, res, { dataKey: "job" });
+      handleResultWithDTO(result, res, {
+        dataKey: "job",
+        dto: JobDTO,
+      });
     }),
   );
 
@@ -90,7 +109,10 @@ function createJobRoutes(services) {
     asyncHandler(async (req, res) => {
       const result = await jobs.run(req.params.id, req.user);
       if (result.success) {
-        return res.json({ job: result.data, message: result.message });
+        return res.json({
+          job: JobDTO.fromEntity(result.data),
+          message: result.message,
+        });
       }
       handleResult(result, res);
     }),
@@ -106,7 +128,10 @@ function createJobRoutes(services) {
     asyncHandler(async (req, res) => {
       const result = await jobs.cancel(req.params.id, req.user);
       if (result.success) {
-        return res.json({ job: result.data, message: result.message });
+        return res.json({
+          job: JobDTO.fromEntity(result.data),
+          message: result.message,
+        });
       }
       handleResult(result, res);
     }),

@@ -16,22 +16,22 @@ class BaseService {
   constructor(repositories, options = {}) {
     this.repositories = repositories;
     this.logger = options.logger || console;
-    this.eventEmitter = options.eventEmitter || null;
+    this.eventBus = options.eventBus || null;
   }
 
   /**
-   * Emit a domain event
-   * @param {string} eventName - Event name
+   * Emit a domain event through the event bus
+   * @param {string} eventType - Event type (e.g., 'workspace.created')
    * @param {Object} payload - Event payload
+   * @param {Object} metadata - Optional metadata (userId, correlationId)
    */
-  emit(eventName, payload) {
-    if (this.eventEmitter) {
-      this.eventEmitter.emit(eventName, {
-        timestamp: new Date().toISOString(),
-        ...payload,
-      });
+  async emit(eventType, payload, metadata = {}) {
+    if (this.eventBus) {
+      await this.eventBus.emit(eventType, payload, metadata);
+    } else {
+      // Fallback to simple logging if no event bus configured
+      this.logger.info(`Event: ${eventType}`, payload);
     }
-    this.logger.info(`Event: ${eventName}`, payload);
   }
 
   /**

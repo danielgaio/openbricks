@@ -2,13 +2,20 @@
  * Workspace Routes
  * RESTful endpoints for workspace management
  * Routes are thin adapters that delegate to WorkspaceService
+ *
+ * Uses DTOs for response transformation (Clean Architecture)
  */
 
 const express = require("express");
 const { asyncHandler } = require("../utils/errors");
-const { handleResult } = require("../utils/routeHelpers");
+const {
+  handleResult,
+  handleResultWithDTO,
+  handleListWithDTO,
+} = require("../utils/routeHelpers");
 const schemas = require("../schemas");
 const { authenticateToken } = require("../middleware/auth");
+const { WorkspaceDTO, WorkspaceDetailDTO } = require("../dtos");
 
 /**
  * Create workspace router
@@ -31,7 +38,8 @@ function createWorkspaceRoutes(services) {
         limit: limit ? parseInt(limit, 10) : undefined,
         offset: offset ? parseInt(offset, 10) : undefined,
       });
-      res.json({ workspaces: result });
+      // Transform using DTO
+      res.json({ workspaces: WorkspaceDTO.fromEntities(result) });
     }),
   );
 
@@ -44,7 +52,11 @@ function createWorkspaceRoutes(services) {
     schemas.workspaces.getById,
     asyncHandler(async (req, res) => {
       const result = await workspaces.getById(req.params.id, req.user);
-      handleResult(result, res, { dataKey: "workspace" });
+      // Use detailed DTO for single entity
+      handleResultWithDTO(result, res, {
+        dataKey: "workspace",
+        dto: WorkspaceDetailDTO,
+      });
     }),
   );
 
@@ -57,7 +69,11 @@ function createWorkspaceRoutes(services) {
     schemas.workspaces.create,
     asyncHandler(async (req, res) => {
       const result = await workspaces.create(req.body, req.user);
-      handleResult(result, res, { successStatus: 201, dataKey: "workspace" });
+      handleResultWithDTO(result, res, {
+        successStatus: 201,
+        dataKey: "workspace",
+        dto: WorkspaceDTO,
+      });
     }),
   );
 
@@ -70,7 +86,10 @@ function createWorkspaceRoutes(services) {
     schemas.workspaces.update,
     asyncHandler(async (req, res) => {
       const result = await workspaces.update(req.params.id, req.body, req.user);
-      handleResult(result, res, { dataKey: "workspace" });
+      handleResultWithDTO(result, res, {
+        dataKey: "workspace",
+        dto: WorkspaceDTO,
+      });
     }),
   );
 

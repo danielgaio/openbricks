@@ -2,13 +2,16 @@
  * Notebook Routes
  * RESTful endpoints for notebook management
  * Routes are thin adapters that delegate to NotebookService
+ *
+ * Uses DTOs for response transformation (Clean Architecture)
  */
 
 const express = require("express");
 const { asyncHandler } = require("../utils/errors");
-const { handleResult } = require("../utils/routeHelpers");
+const { handleResult, handleResultWithDTO, handleListWithDTO } = require("../utils/routeHelpers");
 const schemas = require("../schemas");
 const { authenticateToken } = require("../middleware/auth");
+const { NotebookDTO, NotebookDetailDTO } = require("../dtos");
 
 /**
  * Create notebook router
@@ -33,10 +36,11 @@ function createNotebookRoutes(services) {
         offset: offset ? parseInt(offset, 10) : undefined,
       });
       
-      if (result.success) {
-        return res.json({ notebooks: result.data });
-      }
-      handleResult(result, res);
+      // Transform through DTO - excludes content from list
+      handleListWithDTO(result, res, { 
+        dataKey: "notebooks",
+        dto: NotebookDTO
+      });
     }),
   );
 
@@ -49,7 +53,11 @@ function createNotebookRoutes(services) {
     schemas.notebooks.getById,
     asyncHandler(async (req, res) => {
       const result = await notebooks.getById(req.params.id, req.user);
-      handleResult(result, res, { dataKey: "notebook" });
+      // Use detailed DTO to include content
+      handleResultWithDTO(result, res, { 
+        dataKey: "notebook",
+        dto: NotebookDetailDTO
+      });
     }),
   );
 
@@ -62,7 +70,11 @@ function createNotebookRoutes(services) {
     schemas.notebooks.create,
     asyncHandler(async (req, res) => {
       const result = await notebooks.create(req.body, req.user);
-      handleResult(result, res, { successStatus: 201, dataKey: "notebook" });
+      handleResultWithDTO(result, res, { 
+        successStatus: 201, 
+        dataKey: "notebook",
+        dto: NotebookDTO
+      });
     }),
   );
 
@@ -75,7 +87,10 @@ function createNotebookRoutes(services) {
     schemas.notebooks.update,
     asyncHandler(async (req, res) => {
       const result = await notebooks.update(req.params.id, req.body, req.user);
-      handleResult(result, res, { dataKey: "notebook" });
+      handleResultWithDTO(result, res, { 
+        dataKey: "notebook",
+        dto: NotebookDTO
+      });
     }),
   );
 
@@ -88,7 +103,11 @@ function createNotebookRoutes(services) {
     schemas.notebooks.getById,
     asyncHandler(async (req, res) => {
       const result = await notebooks.updateContent(req.params.id, req.body.content, req.user);
-      handleResult(result, res, { dataKey: "notebook" });
+      // Use detailed DTO since content update returns full notebook
+      handleResultWithDTO(result, res, { 
+        dataKey: "notebook",
+        dto: NotebookDetailDTO
+      });
     }),
   );
 
@@ -112,12 +131,6 @@ function createNotebookRoutes(services) {
 }
 
 module.exports = { createNotebookRoutes };
-    asyncHandler(async (req, res) => {
-      const { id } = req.params;
-
-      const existing = await notebooks.findById(id);
-      if (!existing) {
-        throw errors.notFound("Notebook");
       }
 
       if (!(await notebooks.canAccess(id, req.user))) {

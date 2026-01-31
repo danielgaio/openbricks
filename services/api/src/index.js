@@ -5,6 +5,7 @@
  * Architecture:
  * - Repository Pattern for data access abstraction
  * - Service Layer for business logic (Clean Architecture Use Cases)
+ * - Event-Driven Architecture for async processing and decoupling
  * - Modular route handlers with dependency injection
  * - Centralized error handling and validation
  */
@@ -25,6 +26,9 @@ const { createRepositories } = require("./repositories");
 
 // Services - business logic layer
 const { createServices } = require("./services");
+
+// Events - domain event bus and handlers
+const { createEventBus, registerHandlers } = require("./events");
 
 // Routes - modular route handlers
 const {
@@ -93,13 +97,20 @@ const pool = new Pool({
     "postgresql://openbricks:openbricks@localhost:5432/openbricks",
 });
 
+// Initialize Event Bus for domain events
+const eventBus = createEventBus({ logger });
+
+// Register event handlers (audit, notifications, metrics)
+registerHandlers(eventBus, { pool, logger });
+
 // Initialize repositories with database pool
 const repositories = createRepositories(pool);
 
-// Initialize services with repositories and dependencies
+// Initialize services with repositories, event bus, and dependencies
 const services = createServices(repositories, {
   logger,
   pool, // For audit service direct queries
+  eventBus, // For domain events
 });
 
 // Health check endpoint

@@ -2,13 +2,20 @@
  * Table Routes
  * RESTful endpoints for data catalog tables
  * Routes are thin adapters that delegate to TableService
+ *
+ * Uses DTOs for response transformation (Clean Architecture)
  */
 
 const express = require("express");
 const { asyncHandler } = require("../utils/errors");
-const { handleResult } = require("../utils/routeHelpers");
+const {
+  handleResult,
+  handleResultWithDTO,
+  handleListWithDTO,
+} = require("../utils/routeHelpers");
 const schemas = require("../schemas");
 const { authenticateToken, optionalAuth } = require("../middleware/auth");
+const { TableDTO, TableDetailDTO } = require("../dtos");
 
 /**
  * Create table router
@@ -34,10 +41,11 @@ function createTableRoutes(services) {
         offset: offset ? parseInt(offset, 10) : undefined,
       });
 
-      if (result.success) {
-        return res.json({ tables: result.data });
-      }
-      handleResult(result, res);
+      // Transform through DTO
+      handleListWithDTO(result, res, {
+        dataKey: "tables",
+        dto: TableDTO,
+      });
     }),
   );
 
@@ -65,7 +73,11 @@ function createTableRoutes(services) {
     schemas.tables.getById,
     asyncHandler(async (req, res) => {
       const result = await tables.getById(req.params.id, req.user);
-      handleResult(result, res, { dataKey: "table" });
+      // Use detailed DTO to include schema
+      handleResultWithDTO(result, res, {
+        dataKey: "table",
+        dto: TableDetailDTO,
+      });
     }),
   );
 
@@ -78,7 +90,11 @@ function createTableRoutes(services) {
     schemas.tables.create,
     asyncHandler(async (req, res) => {
       const result = await tables.create(req.body, req.user);
-      handleResult(result, res, { successStatus: 201, dataKey: "table" });
+      handleResultWithDTO(result, res, {
+        successStatus: 201,
+        dataKey: "table",
+        dto: TableDTO,
+      });
     }),
   );
 
@@ -91,7 +107,10 @@ function createTableRoutes(services) {
     schemas.tables.getById,
     asyncHandler(async (req, res) => {
       const result = await tables.update(req.params.id, req.body, req.user);
-      handleResult(result, res, { dataKey: "table" });
+      handleResultWithDTO(result, res, {
+        dataKey: "table",
+        dto: TableDTO,
+      });
     }),
   );
 
@@ -104,8 +123,15 @@ function createTableRoutes(services) {
     schemas.tables.getById,
     asyncHandler(async (req, res) => {
       const { is_public } = req.body;
-      const result = await tables.setVisibility(req.params.id, is_public, req.user);
-      handleResult(result, res, { dataKey: "table" });
+      const result = await tables.setVisibility(
+        req.params.id,
+        is_public,
+        req.user,
+      );
+      handleResultWithDTO(result, res, {
+        dataKey: "table",
+        dto: TableDTO,
+      });
     }),
   );
 
@@ -122,42 +148,6 @@ function createTableRoutes(services) {
         return res.json({ message: "Table deleted successfully" });
       }
       handleResult(result, res);
-    }),
-  );
-
-  return router;
-}
-
-module.exports = { createTableRoutes };
-
-      const table = await tables.setVisibility(id, is_public);
-      res.json({ table });
-    }),
-  );
-
-  /**
-   * DELETE /tables/:id - Delete table from catalog
-   */
-  router.delete(
-    "/:id",
-    authenticateToken,
-    schemas.tables.getById,
-    asyncHandler(async (req, res) => {
-      const { id } = req.params;
-
-      const existing = await tables.findById(id);
-      if (!existing) {
-        throw errors.notFound("Table");
-      }
-
-      if (!(await tables.canModify(id, req.user))) {
-        throw errors.forbidden(
-          "You do not have permission to delete this table",
-        );
-      }
-
-      await tables.delete(id);
-      res.json({ message: "Table deleted successfully" });
     }),
   );
 

@@ -2,13 +2,16 @@
  * Cluster Routes
  * RESTful endpoints for compute cluster management
  * Routes are thin adapters that delegate to ClusterService
+ *
+ * Uses DTOs for response transformation (Clean Architecture)
  */
 
 const express = require("express");
 const { asyncHandler } = require("../utils/errors");
-const { handleResult } = require("../utils/routeHelpers");
+const { handleResult, handleResultWithDTO, handleListWithDTO } = require("../utils/routeHelpers");
 const schemas = require("../schemas");
 const { authenticateToken } = require("../middleware/auth");
+const { ClusterDTO, ClusterDetailDTO } = require("../dtos");
 
 /**
  * Create cluster router
@@ -33,10 +36,11 @@ function createClusterRoutes(services) {
         offset: offset ? parseInt(offset, 10) : undefined,
       });
 
-      if (result.success) {
-        return res.json({ clusters: result.data });
-      }
-      handleResult(result, res);
+      // Transform through DTO
+      handleListWithDTO(result, res, { 
+        dataKey: "clusters",
+        dto: ClusterDTO
+      });
     }),
   );
 
@@ -49,7 +53,11 @@ function createClusterRoutes(services) {
     schemas.clusters.getById,
     asyncHandler(async (req, res) => {
       const result = await clusters.getById(req.params.id, req.user);
-      handleResult(result, res, { dataKey: "cluster" });
+      // Use detailed DTO for single entity
+      handleResultWithDTO(result, res, { 
+        dataKey: "cluster",
+        dto: ClusterDetailDTO
+      });
     }),
   );
 
@@ -62,7 +70,11 @@ function createClusterRoutes(services) {
     schemas.clusters.create,
     asyncHandler(async (req, res) => {
       const result = await clusters.create(req.body, req.user);
-      handleResult(result, res, { successStatus: 201, dataKey: "cluster" });
+      handleResultWithDTO(result, res, { 
+        successStatus: 201, 
+        dataKey: "cluster",
+        dto: ClusterDTO
+      });
     }),
   );
 
@@ -75,7 +87,10 @@ function createClusterRoutes(services) {
     schemas.clusters.update,
     asyncHandler(async (req, res) => {
       const result = await clusters.update(req.params.id, req.body, req.user);
-      handleResult(result, res, { dataKey: "cluster" });
+      handleResultWithDTO(result, res, { 
+        dataKey: "cluster",
+        dto: ClusterDTO
+      });
     }),
   );
 
@@ -89,7 +104,10 @@ function createClusterRoutes(services) {
     asyncHandler(async (req, res) => {
       const result = await clusters.start(req.params.id, req.user);
       if (result.success) {
-        return res.json({ cluster: result.data, message: result.message });
+        return res.json({ 
+          cluster: ClusterDTO.fromEntity(result.data), 
+          message: result.message 
+        });
       }
       handleResult(result, res);
     }),
@@ -105,7 +123,10 @@ function createClusterRoutes(services) {
     asyncHandler(async (req, res) => {
       const result = await clusters.stop(req.params.id, req.user);
       if (result.success) {
-        return res.json({ cluster: result.data, message: result.message });
+        return res.json({ 
+          cluster: ClusterDTO.fromEntity(result.data), 
+          message: result.message 
+        });
       }
       handleResult(result, res);
     }),
@@ -121,7 +142,10 @@ function createClusterRoutes(services) {
     asyncHandler(async (req, res) => {
       const result = await clusters.terminate(req.params.id, req.user);
       if (result.success) {
-        return res.json({ cluster: result.data, message: result.message });
+        return res.json({ 
+          cluster: ClusterDTO.fromEntity(result.data), 
+          message: result.message 
+        });
       }
       handleResult(result, res);
     }),
@@ -138,7 +162,10 @@ function createClusterRoutes(services) {
       const { num_workers } = req.body;
       const result = await clusters.scale(req.params.id, num_workers, req.user);
       if (result.success) {
-        return res.json({ cluster: result.data, message: result.message });
+        return res.json({ 
+          cluster: ClusterDTO.fromEntity(result.data), 
+          message: result.message 
+        });
       }
       handleResult(result, res);
     }),
@@ -163,20 +190,7 @@ function createClusterRoutes(services) {
   return router;
 }
 
-module.exports = { createClusterRoutes };
-
-  /**
-   * DELETE /clusters/:id - Delete cluster (admin only)
-   */
-  router.delete(
-    "/:id",
-    authenticateToken,
-    requireRole("admin"),
-    schemas.clusters.getById,
-    asyncHandler(async (req, res) => {
-      const { id } = req.params;
-
-      const existing = await clusters.findById(id);
+module.exports = { createClusterRoutes };      const existing = await clusters.findById(id);
       if (!existing) {
         throw errors.notFound("Cluster");
       }

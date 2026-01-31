@@ -1,6 +1,8 @@
-# Implementation Report: Query Engine Service
+# Implementation Report: Phase 4 - Query Engine Service
 
-## 1. Project Analysis & Task Selection
+## Overview
+
+This phase implemented a **Production-Ready Query Engine** using FastAPI for SQL query execution against Delta Lake tables.
 
 **Analysis**: The **Query Engine** (`services/query-engine`) was a placeholder service using Flask, lacking critical configurations for S3/MinIO connectivity and authentication. It could not actually query the Delta tables created by the Storage Service.
 **Selected Task**: **Implement Production-Ready Query Engine**.

@@ -4,6 +4,7 @@
  */
 
 const { BaseService } = require("./BaseService");
+const { DomainEvents } = require("../events");
 
 // Valid cluster status transitions
 const STATUS_TRANSITIONS = {
@@ -84,11 +85,22 @@ class ClusterService extends BaseService {
   async create(data, user) {
     // Only admins can create clusters
     if (!this.isAdmin(user)) {
-      return { success: false, error: "FORBIDDEN", message: "Only admins can create clusters" };
+      return {
+        success: false,
+        error: "FORBIDDEN",
+        message: "Only admins can create clusters",
+      };
     }
 
     const config = { ...CLUSTER_DEFAULTS, ...data };
-    const { name, node_type, num_workers, driver_memory, executor_memory, spark_version } = config;
+    const {
+      name,
+      node_type,
+      num_workers,
+      driver_memory,
+      executor_memory,
+      spark_version,
+    } = config;
 
     // Validate node type
     if (!NODE_TYPES[node_type]) {
@@ -120,11 +132,7 @@ class ClusterService extends BaseService {
       owner_id: user.id,
     });
 
-    this.emit("cluster.created", {
-      clusterId: cluster.id,
-      userId: user.id,
-      config: { node_type, num_workers, spark_version },
-    });
+    this.emit(DomainEvents.CLUSTER_CREATED, { cluster, userId: user.id });
 
     return { success: true, data: cluster };
   }
@@ -139,7 +147,11 @@ class ClusterService extends BaseService {
   async update(id, data, user) {
     // Only admins can update clusters
     if (!this.isAdmin(user)) {
-      return { success: false, error: "FORBIDDEN", message: "Only admins can update clusters" };
+      return {
+        success: false,
+        error: "FORBIDDEN",
+        message: "Only admins can update clusters",
+      };
     }
 
     const existing = await this.clusters.findById(id);
@@ -148,11 +160,15 @@ class ClusterService extends BaseService {
     }
 
     // Cannot update running clusters (except for scaling)
-    if (existing.status === "running" && (data.node_type || data.spark_version)) {
+    if (
+      existing.status === "running" &&
+      (data.node_type || data.spark_version)
+    ) {
       return {
         success: false,
         error: "CONFLICT",
-        message: "Cannot change node_type or spark_version on running cluster. Stop it first.",
+        message:
+          "Cannot change node_type or spark_version on running cluster. Stop it first.",
       };
     }
 
@@ -161,13 +177,15 @@ class ClusterService extends BaseService {
     if (data.name !== undefined) updates.name = data.name;
     if (data.node_type !== undefined) updates.node_type = data.node_type;
     if (data.num_workers !== undefined) updates.num_workers = data.num_workers;
-    if (data.driver_memory !== undefined) updates.driver_memory = data.driver_memory;
-    if (data.executor_memory !== undefined) updates.executor_memory = data.executor_memory;
+    if (data.driver_memory !== undefined)
+      updates.driver_memory = data.driver_memory;
+    if (data.executor_memory !== undefined)
+      updates.executor_memory = data.executor_memory;
 
     const cluster = await this.clusters.update(id, updates);
 
-    this.emit("cluster.updated", {
-      clusterId: id,
+    this.emit(DomainEvents.CLUSTER_UPDATED, {
+      cluster,
       userId: user.id,
       changes: Object.keys(updates),
     });
@@ -184,7 +202,11 @@ class ClusterService extends BaseService {
   async start(id, user) {
     // Only admins can start clusters
     if (!this.isAdmin(user)) {
-      return { success: false, error: "FORBIDDEN", message: "Only admins can start clusters" };
+      return {
+        success: false,
+        error: "FORBIDDEN",
+        message: "Only admins can start clusters",
+      };
     }
 
     const existing = await this.clusters.findById(id);
@@ -203,8 +225,8 @@ class ClusterService extends BaseService {
 
     const cluster = await this.clusters.start(id);
 
-    this.emit("cluster.starting", {
-      clusterId: id,
+    this.emit(DomainEvents.CLUSTER_STARTING, {
+      cluster,
       userId: user.id,
       previousStatus: existing.status,
     });
@@ -221,7 +243,11 @@ class ClusterService extends BaseService {
   async stop(id, user) {
     // Only admins can stop clusters
     if (!this.isAdmin(user)) {
-      return { success: false, error: "FORBIDDEN", message: "Only admins can stop clusters" };
+      return {
+        success: false,
+        error: "FORBIDDEN",
+        message: "Only admins can stop clusters",
+      };
     }
 
     const existing = await this.clusters.findById(id);
@@ -240,8 +266,8 @@ class ClusterService extends BaseService {
 
     const cluster = await this.clusters.stop(id);
 
-    this.emit("cluster.stopping", {
-      clusterId: id,
+    this.emit(DomainEvents.CLUSTER_STOPPING, {
+      cluster,
       userId: user.id,
       previousStatus: existing.status,
     });
@@ -258,7 +284,11 @@ class ClusterService extends BaseService {
   async terminate(id, user) {
     // Only admins can terminate clusters
     if (!this.isAdmin(user)) {
-      return { success: false, error: "FORBIDDEN", message: "Only admins can terminate clusters" };
+      return {
+        success: false,
+        error: "FORBIDDEN",
+        message: "Only admins can terminate clusters",
+      };
     }
 
     const existing = await this.clusters.findById(id);
@@ -268,13 +298,17 @@ class ClusterService extends BaseService {
 
     // Can terminate from most states except already terminated
     if (existing.status === "terminated") {
-      return { success: false, error: "CONFLICT", message: "Cluster is already terminated" };
+      return {
+        success: false,
+        error: "CONFLICT",
+        message: "Cluster is already terminated",
+      };
     }
 
     const cluster = await this.clusters.terminate(id);
 
-    this.emit("cluster.terminated", {
-      clusterId: id,
+    this.emit(DomainEvents.CLUSTER_TERMINATED, {
+      cluster,
       userId: user.id,
       previousStatus: existing.status,
     });
@@ -292,7 +326,11 @@ class ClusterService extends BaseService {
   async scale(id, numWorkers, user) {
     // Only admins can scale clusters
     if (!this.isAdmin(user)) {
-      return { success: false, error: "FORBIDDEN", message: "Only admins can scale clusters" };
+      return {
+        success: false,
+        error: "FORBIDDEN",
+        message: "Only admins can scale clusters",
+      };
     }
 
     const existing = await this.clusters.findById(id);
@@ -303,7 +341,11 @@ class ClusterService extends BaseService {
     // Validate worker count for node type
     const nodeConfig = NODE_TYPES[existing.node_type];
     if (!nodeConfig) {
-      return { success: false, error: "INTERNAL", message: "Invalid cluster node type" };
+      return {
+        success: false,
+        error: "INTERNAL",
+        message: "Invalid cluster node type",
+      };
     }
 
     if (numWorkers < 1 || numWorkers > nodeConfig.maxWorkers) {
@@ -317,8 +359,8 @@ class ClusterService extends BaseService {
     const previousWorkers = existing.num_workers;
     const cluster = await this.clusters.scale(id, numWorkers);
 
-    this.emit("cluster.scaled", {
-      clusterId: id,
+    this.emit(DomainEvents.CLUSTER_SCALED, {
+      cluster,
       userId: user.id,
       previousWorkers,
       newWorkers: numWorkers,
@@ -340,7 +382,11 @@ class ClusterService extends BaseService {
   async delete(id, user) {
     // Only admins can delete clusters
     if (!this.isAdmin(user)) {
-      return { success: false, error: "FORBIDDEN", message: "Only admins can delete clusters" };
+      return {
+        success: false,
+        error: "FORBIDDEN",
+        message: "Only admins can delete clusters",
+      };
     }
 
     const existing = await this.clusters.findById(id);
@@ -353,16 +399,14 @@ class ClusterService extends BaseService {
       return {
         success: false,
         error: "CONFLICT",
-        message: "Cannot delete cluster that is not terminated. Terminate it first.",
+        message:
+          "Cannot delete cluster that is not terminated. Terminate it first.",
       };
     }
 
     await this.clusters.delete(id);
 
-    this.emit("cluster.deleted", {
-      clusterId: id,
-      userId: user.id,
-    });
+    this.emit(DomainEvents.CLUSTER_DELETED, { id, userId: user.id });
 
     return { success: true };
   }

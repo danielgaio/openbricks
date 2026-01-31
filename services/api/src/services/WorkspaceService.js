@@ -4,6 +4,7 @@
  */
 
 const { BaseService } = require("./BaseService");
+const { DomainEvents } = require("../events");
 
 /**
  * WorkspaceService handles all workspace-related business logic
@@ -62,11 +63,7 @@ class WorkspaceService extends BaseService {
       owner_id: user.id,
     });
 
-    this.emit("workspace.created", {
-      workspaceId: workspace.id,
-      userId: user.id,
-      name: workspace.name,
-    });
+    this.emit(DomainEvents.WORKSPACE_CREATED, { workspace, userId: user.id });
 
     return { success: true, data: workspace };
   }
@@ -96,8 +93,8 @@ class WorkspaceService extends BaseService {
 
     const workspace = await this.workspaces.update(id, updates);
 
-    this.emit("workspace.updated", {
-      workspaceId: id,
+    this.emit(DomainEvents.WORKSPACE_UPDATED, {
+      workspace,
       userId: user.id,
       changes: Object.keys(updates),
     });
@@ -135,10 +132,7 @@ class WorkspaceService extends BaseService {
 
     await this.workspaces.delete(id);
 
-    this.emit("workspace.deleted", {
-      workspaceId: id,
-      userId: user.id,
-    });
+    this.emit(DomainEvents.WORKSPACE_DELETED, { id, userId: user.id });
 
     return { success: true };
   }

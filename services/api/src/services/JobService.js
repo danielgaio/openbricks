@@ -4,6 +4,7 @@
  */
 
 const { BaseService } = require("./BaseService");
+const { DomainEvents } = require("../events");
 
 // Valid job status transitions
 const STATUS_TRANSITIONS = {
@@ -37,7 +38,11 @@ class JobService extends BaseService {
     if (notebook_id) {
       const notebook = await this.notebooks.findById(notebook_id);
       if (!notebook) {
-        return { success: false, error: "NOT_FOUND", message: "Notebook not found" };
+        return {
+          success: false,
+          error: "NOT_FOUND",
+          message: "Notebook not found",
+        };
       }
       if (!this.canAccess(notebook, user)) {
         return { success: false, error: "FORBIDDEN" };
@@ -49,7 +54,11 @@ class JobService extends BaseService {
     // Filter by status (admin only)
     if (status) {
       if (!this.isAdmin(user)) {
-        return { success: false, error: "FORBIDDEN", message: "Only admins can filter by status" };
+        return {
+          success: false,
+          error: "FORBIDDEN",
+          message: "Only admins can filter by status",
+        };
       }
       const jobs = await this.jobs.findByStatus(status);
       return { success: true, data: jobs };
@@ -92,15 +101,27 @@ class JobService extends BaseService {
     // Verify notebook exists and user has access
     const notebook = await this.notebooks.findById(notebook_id);
     if (!notebook) {
-      return { success: false, error: "NOT_FOUND", message: "Notebook not found" };
+      return {
+        success: false,
+        error: "NOT_FOUND",
+        message: "Notebook not found",
+      };
     }
     if (!this.canAccess(notebook, user)) {
-      return { success: false, error: "FORBIDDEN", message: "You do not have access to this notebook" };
+      return {
+        success: false,
+        error: "FORBIDDEN",
+        message: "You do not have access to this notebook",
+      };
     }
 
     // Validate schedule format if provided
     if (schedule && !this.isValidCronExpression(schedule)) {
-      return { success: false, error: "VALIDATION", message: "Invalid cron schedule format" };
+      return {
+        success: false,
+        error: "VALIDATION",
+        message: "Invalid cron schedule format",
+      };
     }
 
     const job = await this.jobs.create({
@@ -111,12 +132,7 @@ class JobService extends BaseService {
       owner_id: user.id,
     });
 
-    this.emit("job.created", {
-      jobId: job.id,
-      userId: user.id,
-      notebookId: notebook_id,
-      schedule,
-    });
+    this.emit(DomainEvents.JOB_CREATED, { job, userId: user.id });
 
     return { success: true, data: job };
   }
@@ -141,7 +157,11 @@ class JobService extends BaseService {
 
     // Validate schedule if provided
     if (data.schedule && !this.isValidCronExpression(data.schedule)) {
-      return { success: false, error: "VALIDATION", message: "Invalid cron schedule format" };
+      return {
+        success: false,
+        error: "VALIDATION",
+        message: "Invalid cron schedule format",
+      };
     }
 
     // Build update object
@@ -151,8 +171,8 @@ class JobService extends BaseService {
 
     const job = await this.jobs.update(id, updates);
 
-    this.emit("job.updated", {
-      jobId: id,
+    this.emit(DomainEvents.JOB_UPDATED, {
+      job,
       userId: user.id,
       changes: Object.keys(updates),
     });
@@ -179,7 +199,11 @@ class JobService extends BaseService {
 
     // Check if job is already running
     if (existing.status === "running") {
-      return { success: false, error: "CONFLICT", message: "Job is already running" };
+      return {
+        success: false,
+        error: "CONFLICT",
+        message: "Job is already running",
+      };
     }
 
     // Validate status transition
@@ -193,8 +217,8 @@ class JobService extends BaseService {
 
     const job = await this.jobs.updateStatus(id, "pending");
 
-    this.emit("job.triggered", {
-      jobId: id,
+    this.emit(DomainEvents.JOB_QUEUED, {
+      job,
       userId: user.id,
       previousStatus: existing.status,
     });
@@ -230,8 +254,8 @@ class JobService extends BaseService {
 
     const job = await this.jobs.updateStatus(id, "cancelled");
 
-    this.emit("job.cancelled", {
-      jobId: id,
+    this.emit(DomainEvents.JOB_CANCELLED, {
+      job,
       userId: user.id,
       previousStatus: existing.status,
     });
@@ -267,10 +291,7 @@ class JobService extends BaseService {
 
     await this.jobs.delete(id);
 
-    this.emit("job.deleted", {
-      jobId: id,
-      userId: user.id,
-    });
+    this.emit(DomainEvents.JOB_DELETED, { id, userId: user.id });
 
     return { success: true };
   }
