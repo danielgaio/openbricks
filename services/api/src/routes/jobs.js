@@ -1,21 +1,23 @@
 /**
  * Job Routes
  * RESTful endpoints for job scheduling
+ * Routes are thin adapters that delegate to JobService
  */
 
 const express = require("express");
-const { asyncHandler, errors } = require("../utils/errors");
+const { asyncHandler } = require("../utils/errors");
+const { handleResult } = require("../utils/routeHelpers");
 const schemas = require("../schemas");
 const { authenticateToken } = require("../middleware/auth");
 
 /**
  * Create job router
- * @param {Object} repositories - Repository instances
+ * @param {Object} services - Service instances
  * @returns {express.Router} Configured router
  */
-function createJobRoutes(repositories) {
+function createJobRoutes(services) {
   const router = express.Router();
-  const { jobs, notebooks } = repositories;
+  const { jobs } = services;
 
   /**
    * GET /jobs - List jobs
@@ -24,27 +26,19 @@ function createJobRoutes(repositories) {
     "/",
     authenticateToken,
     asyncHandler(async (req, res) => {
-      const { status, notebook_id } = req.query;
+      const { status, notebook_id, limit, offset } = req.query;
+      const result = await jobs.list(req.user, {
+        status,
+        notebook_id,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        offset: offset ? parseInt(offset, 10) : undefined,
+      });
 
-      let result;
-      if (notebook_id) {
-        // Verify notebook access
-        if (!(await notebooks.canAccess(notebook_id, req.user))) {
-          throw errors.forbidden("You do not have access to this notebook");
-        }
-        result = await jobs.findByNotebook(notebook_id);
-      } else if (status) {
-        // Filter by status (admin only)
-        if (req.user.role !== "admin") {
-          throw errors.forbidden("Only admins can filter by status");
-        }
-        result = await jobs.findByStatus(status);
-      } else {
-        result = await jobs.findForUser(req.user);
+      if (result.success) {
+        return res.json({ jobs: result.data });
       }
-
-      res.json({ jobs: result });
-    })
+      handleResult(result, res);
+    }),
   );
 
   /**
@@ -55,18 +49,9 @@ function createJobRoutes(repositories) {
     authenticateToken,
     schemas.jobs.getById,
     asyncHandler(async (req, res) => {
-      const job = await jobs.findByIdWithNotebook(req.params.id);
-
-      if (!job) {
-        throw errors.notFound("Job");
-      }
-
-      if (!(await jobs.canAccess(job.id, req.user))) {
-        throw errors.forbidden("You do not have access to this job");
-      }
-
-      res.json({ job });
-    })
+      const result = await jobs.getById(req.params.id, req.user);
+      handleResult(result, res, { dataKey: "job" });
+    }),
   );
 
   /**
@@ -77,28 +62,9 @@ function createJobRoutes(repositories) {
     authenticateToken,
     schemas.jobs.create,
     asyncHandler(async (req, res) => {
-      const { name, notebook_id, schedule } = req.body;
-
-      // Verify user owns the notebook
-      const notebook = await notebooks.findById(notebook_id);
-      if (!notebook) {
-        throw errors.notFound("Notebook");
-      }
-
-      if (!(await notebooks.canAccess(notebook_id, req.user))) {
-        throw errors.forbidden("You do not own this notebook");
-      }
-
-      const job = await jobs.create({
-        name,
-        notebook_id,
-        schedule,
-        status: "pending",
-        owner_id: req.user.id,
-      });
-
-      res.status(201).json({ job });
-    })
+      const result = await jobs.create(req.body, req.user);
+      handleResult(result, res, { successStatus: 201, dataKey: "job" });
+    }),
   );
 
   /**
@@ -109,27 +75,9 @@ function createJobRoutes(repositories) {
     authenticateToken,
     schemas.jobs.update,
     asyncHandler(async (req, res) => {
-      const { id } = req.params;
-      const { name, schedule, status } = req.body;
-
-      const existing = await jobs.findById(id);
-      if (!existing) {
-        throw errors.notFound("Job");
-      }
-
-      if (!(await jobs.canAccess(id, req.user))) {
-        throw errors.forbidden("You do not have permission to update this job");
-      }
-
-      // Build update object with only provided fields
-      const updates = {};
-      if (name !== undefined) updates.name = name;
-      if (schedule !== undefined) updates.schedule = schedule;
-      if (status !== undefined) updates.status = status;
-
-      const job = await jobs.update(id, updates);
-      res.json({ job });
-    })
+      const result = await jobs.update(req.params.id, req.body, req.user);
+      handleResult(result, res, { dataKey: "job" });
+    }),
   );
 
   /**
@@ -140,21 +88,12 @@ function createJobRoutes(repositories) {
     authenticateToken,
     schemas.jobs.getById,
     asyncHandler(async (req, res) => {
-      const { id } = req.params;
-
-      const existing = await jobs.findById(id);
-      if (!existing) {
-        throw errors.notFound("Job");
+      const result = await jobs.run(req.params.id, req.user);
+      if (result.success) {
+        return res.json({ job: result.data, message: result.message });
       }
-
-      if (!(await jobs.canAccess(id, req.user))) {
-        throw errors.forbidden("You do not have permission to run this job");
-      }
-
-      // Update status to pending (job scheduler will pick it up)
-      const job = await jobs.updateStatus(id, "pending");
-      res.json({ job, message: "Job queued for execution" });
-    })
+      handleResult(result, res);
+    }),
   );
 
   /**
@@ -165,24 +104,12 @@ function createJobRoutes(repositories) {
     authenticateToken,
     schemas.jobs.getById,
     asyncHandler(async (req, res) => {
-      const { id } = req.params;
-
-      const existing = await jobs.findById(id);
-      if (!existing) {
-        throw errors.notFound("Job");
+      const result = await jobs.cancel(req.params.id, req.user);
+      if (result.success) {
+        return res.json({ job: result.data, message: result.message });
       }
-
-      if (!(await jobs.canAccess(id, req.user))) {
-        throw errors.forbidden("You do not have permission to cancel this job");
-      }
-
-      if (existing.status !== "running" && existing.status !== "pending") {
-        throw errors.badRequest("Job is not running or pending");
-      }
-
-      const job = await jobs.updateStatus(id, "cancelled");
-      res.json({ job, message: "Job cancelled" });
-    })
+      handleResult(result, res);
+    }),
   );
 
   /**
@@ -193,20 +120,12 @@ function createJobRoutes(repositories) {
     authenticateToken,
     schemas.jobs.getById,
     asyncHandler(async (req, res) => {
-      const { id } = req.params;
-
-      const existing = await jobs.findById(id);
-      if (!existing) {
-        throw errors.notFound("Job");
+      const result = await jobs.delete(req.params.id, req.user);
+      if (result.success) {
+        return res.json({ message: "Job deleted successfully" });
       }
-
-      if (!(await jobs.canAccess(id, req.user))) {
-        throw errors.forbidden("You do not have permission to delete this job");
-      }
-
-      await jobs.delete(id);
-      res.json({ message: "Job deleted successfully" });
-    })
+      handleResult(result, res);
+    }),
   );
 
   return router;

@@ -1,21 +1,23 @@
 /**
  * Notebook Routes
  * RESTful endpoints for notebook management
+ * Routes are thin adapters that delegate to NotebookService
  */
 
 const express = require("express");
-const { asyncHandler, errors } = require("../utils/errors");
+const { asyncHandler } = require("../utils/errors");
+const { handleResult } = require("../utils/routeHelpers");
 const schemas = require("../schemas");
 const { authenticateToken } = require("../middleware/auth");
 
 /**
  * Create notebook router
- * @param {Object} repositories - Repository instances
+ * @param {Object} services - Service instances
  * @returns {express.Router} Configured router
  */
-function createNotebookRoutes(repositories) {
+function createNotebookRoutes(services) {
   const router = express.Router();
-  const { notebooks, workspaces } = repositories;
+  const { notebooks } = services;
 
   /**
    * GET /notebooks - List notebooks
@@ -24,20 +26,17 @@ function createNotebookRoutes(repositories) {
     "/",
     authenticateToken,
     asyncHandler(async (req, res) => {
-      const { workspace_id } = req.query;
-
-      let result;
-      if (workspace_id) {
-        // Verify workspace access
-        if (!(await workspaces.canAccess(workspace_id, req.user))) {
-          throw errors.forbidden("You do not have access to this workspace");
-        }
-        result = await notebooks.findByWorkspace(workspace_id);
-      } else {
-        result = await notebooks.findForUser(req.user);
+      const { workspace_id, limit, offset } = req.query;
+      const result = await notebooks.list(req.user, {
+        workspace_id,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        offset: offset ? parseInt(offset, 10) : undefined,
+      });
+      
+      if (result.success) {
+        return res.json({ notebooks: result.data });
       }
-
-      res.json({ notebooks: result });
+      handleResult(result, res);
     }),
   );
 
@@ -49,17 +48,8 @@ function createNotebookRoutes(repositories) {
     authenticateToken,
     schemas.notebooks.getById,
     asyncHandler(async (req, res) => {
-      const notebook = await notebooks.findByIdWithWorkspace(req.params.id);
-
-      if (!notebook) {
-        throw errors.notFound("Notebook");
-      }
-
-      if (!(await notebooks.canAccess(notebook.id, req.user))) {
-        throw errors.forbidden("You do not have access to this notebook");
-      }
-
-      res.json({ notebook });
+      const result = await notebooks.getById(req.params.id, req.user);
+      handleResult(result, res, { dataKey: "notebook" });
     }),
   );
 
@@ -71,33 +61,8 @@ function createNotebookRoutes(repositories) {
     authenticateToken,
     schemas.notebooks.create,
     asyncHandler(async (req, res) => {
-      const {
-        name,
-        workspace_id,
-        language = "python",
-        content = "",
-      } = req.body;
-
-      // Verify workspace access if workspace_id provided
-      if (workspace_id) {
-        const workspace = await workspaces.findById(workspace_id);
-        if (!workspace) {
-          throw errors.notFound("Workspace");
-        }
-        if (!(await workspaces.canAccess(workspace_id, req.user))) {
-          throw errors.forbidden("You do not have access to this workspace");
-        }
-      }
-
-      const notebook = await notebooks.create({
-        name,
-        workspace_id,
-        language,
-        content,
-        owner_id: req.user.id,
-      });
-
-      res.status(201).json({ notebook });
+      const result = await notebooks.create(req.body, req.user);
+      handleResult(result, res, { successStatus: 201, dataKey: "notebook" });
     }),
   );
 
@@ -109,38 +74,8 @@ function createNotebookRoutes(repositories) {
     authenticateToken,
     schemas.notebooks.update,
     asyncHandler(async (req, res) => {
-      const { id } = req.params;
-      const { name, workspace_id, language, content } = req.body;
-
-      const existing = await notebooks.findById(id);
-      if (!existing) {
-        throw errors.notFound("Notebook");
-      }
-
-      if (!(await notebooks.canAccess(id, req.user))) {
-        throw errors.forbidden(
-          "You do not have permission to update this notebook",
-        );
-      }
-
-      // If changing workspace, verify access to new workspace
-      if (workspace_id && workspace_id !== existing.workspace_id) {
-        if (!(await workspaces.canAccess(workspace_id, req.user))) {
-          throw errors.forbidden(
-            "You do not have access to the target workspace",
-          );
-        }
-      }
-
-      // Build update object with only provided fields
-      const updates = {};
-      if (name !== undefined) updates.name = name;
-      if (workspace_id !== undefined) updates.workspace_id = workspace_id;
-      if (language !== undefined) updates.language = language;
-      if (content !== undefined) updates.content = content;
-
-      const notebook = await notebooks.update(id, updates);
-      res.json({ notebook });
+      const result = await notebooks.update(req.params.id, req.body, req.user);
+      handleResult(result, res, { dataKey: "notebook" });
     }),
   );
 
@@ -152,22 +87,8 @@ function createNotebookRoutes(repositories) {
     authenticateToken,
     schemas.notebooks.getById,
     asyncHandler(async (req, res) => {
-      const { id } = req.params;
-      const { content } = req.body;
-
-      const existing = await notebooks.findById(id);
-      if (!existing) {
-        throw errors.notFound("Notebook");
-      }
-
-      if (!(await notebooks.canAccess(id, req.user))) {
-        throw errors.forbidden(
-          "You do not have permission to update this notebook",
-        );
-      }
-
-      const notebook = await notebooks.updateContent(id, content);
-      res.json({ notebook });
+      const result = await notebooks.updateContent(req.params.id, req.body.content, req.user);
+      handleResult(result, res, { dataKey: "notebook" });
     }),
   );
 
@@ -178,6 +99,19 @@ function createNotebookRoutes(repositories) {
     "/:id",
     authenticateToken,
     schemas.notebooks.getById,
+    asyncHandler(async (req, res) => {
+      const result = await notebooks.delete(req.params.id, req.user);
+      if (result.success) {
+        return res.json({ message: "Notebook deleted successfully" });
+      }
+      handleResult(result, res);
+    }),
+  );
+
+  return router;
+}
+
+module.exports = { createNotebookRoutes };
     asyncHandler(async (req, res) => {
       const { id } = req.params;
 

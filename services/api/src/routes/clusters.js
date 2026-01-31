@@ -1,21 +1,23 @@
 /**
  * Cluster Routes
  * RESTful endpoints for compute cluster management
+ * Routes are thin adapters that delegate to ClusterService
  */
 
 const express = require("express");
-const { asyncHandler, errors } = require("../utils/errors");
+const { asyncHandler } = require("../utils/errors");
+const { handleResult } = require("../utils/routeHelpers");
 const schemas = require("../schemas");
-const { authenticateToken, requireRole } = require("../middleware/auth");
+const { authenticateToken } = require("../middleware/auth");
 
 /**
  * Create cluster router
- * @param {Object} repositories - Repository instances
+ * @param {Object} services - Service instances
  * @returns {express.Router} Configured router
  */
-function createClusterRoutes(repositories) {
+function createClusterRoutes(services) {
   const router = express.Router();
-  const { clusters } = repositories;
+  const { clusters } = services;
 
   /**
    * GET /clusters - List clusters
@@ -24,16 +26,17 @@ function createClusterRoutes(repositories) {
     "/",
     authenticateToken,
     asyncHandler(async (req, res) => {
-      const { status } = req.query;
+      const { status, limit, offset } = req.query;
+      const result = await clusters.list(req.user, {
+        status,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        offset: offset ? parseInt(offset, 10) : undefined,
+      });
 
-      let result;
-      if (status) {
-        result = await clusters.findByStatus(status);
-      } else {
-        result = await clusters.findAll();
+      if (result.success) {
+        return res.json({ clusters: result.data });
       }
-
-      res.json({ clusters: result });
+      handleResult(result, res);
     }),
   );
 
@@ -45,13 +48,8 @@ function createClusterRoutes(repositories) {
     authenticateToken,
     schemas.clusters.getById,
     asyncHandler(async (req, res) => {
-      const cluster = await clusters.findByIdWithStats(req.params.id);
-
-      if (!cluster) {
-        throw errors.notFound("Cluster");
-      }
-
-      res.json({ cluster });
+      const result = await clusters.getById(req.params.id, req.user);
+      handleResult(result, res, { dataKey: "cluster" });
     }),
   );
 
@@ -61,30 +59,10 @@ function createClusterRoutes(repositories) {
   router.post(
     "/",
     authenticateToken,
-    requireRole("admin"),
     schemas.clusters.create,
     asyncHandler(async (req, res) => {
-      const {
-        name,
-        node_type = "standard",
-        num_workers = 1,
-        driver_memory = "2g",
-        executor_memory = "2g",
-        spark_version = "3.5.0",
-      } = req.body;
-
-      const cluster = await clusters.create({
-        name,
-        node_type,
-        num_workers,
-        driver_memory,
-        executor_memory,
-        spark_version,
-        status: "terminated",
-        owner_id: req.user.id,
-      });
-
-      res.status(201).json({ cluster });
+      const result = await clusters.create(req.body, req.user);
+      handleResult(result, res, { successStatus: 201, dataKey: "cluster" });
     }),
   );
 
@@ -94,24 +72,10 @@ function createClusterRoutes(repositories) {
   router.put(
     "/:id",
     authenticateToken,
-    requireRole("admin"),
     schemas.clusters.update,
     asyncHandler(async (req, res) => {
-      const { id } = req.params;
-      const { name, num_workers } = req.body;
-
-      const existing = await clusters.findById(id);
-      if (!existing) {
-        throw errors.notFound("Cluster");
-      }
-
-      // Build update object with only provided fields
-      const updates = {};
-      if (name !== undefined) updates.name = name;
-      if (num_workers !== undefined) updates.num_workers = num_workers;
-
-      const cluster = await clusters.update(id, updates);
-      res.json({ cluster });
+      const result = await clusters.update(req.params.id, req.body, req.user);
+      handleResult(result, res, { dataKey: "cluster" });
     }),
   );
 
@@ -121,22 +85,13 @@ function createClusterRoutes(repositories) {
   router.post(
     "/:id/start",
     authenticateToken,
-    requireRole("admin"),
     schemas.clusters.getById,
     asyncHandler(async (req, res) => {
-      const { id } = req.params;
-
-      const existing = await clusters.findById(id);
-      if (!existing) {
-        throw errors.notFound("Cluster");
+      const result = await clusters.start(req.params.id, req.user);
+      if (result.success) {
+        return res.json({ cluster: result.data, message: result.message });
       }
-
-      if (existing.status === "running" || existing.status === "starting") {
-        throw errors.badRequest("Cluster is already running or starting");
-      }
-
-      const cluster = await clusters.start(id);
-      res.json({ cluster, message: "Cluster starting" });
+      handleResult(result, res);
     }),
   );
 
@@ -146,22 +101,13 @@ function createClusterRoutes(repositories) {
   router.post(
     "/:id/stop",
     authenticateToken,
-    requireRole("admin"),
     schemas.clusters.getById,
     asyncHandler(async (req, res) => {
-      const { id } = req.params;
-
-      const existing = await clusters.findById(id);
-      if (!existing) {
-        throw errors.notFound("Cluster");
+      const result = await clusters.stop(req.params.id, req.user);
+      if (result.success) {
+        return res.json({ cluster: result.data, message: result.message });
       }
-
-      if (existing.status !== "running") {
-        throw errors.badRequest("Cluster is not running");
-      }
-
-      const cluster = await clusters.stop(id);
-      res.json({ cluster, message: "Cluster stopping" });
+      handleResult(result, res);
     }),
   );
 
@@ -171,22 +117,13 @@ function createClusterRoutes(repositories) {
   router.post(
     "/:id/terminate",
     authenticateToken,
-    requireRole("admin"),
     schemas.clusters.getById,
     asyncHandler(async (req, res) => {
-      const { id } = req.params;
-
-      const existing = await clusters.findById(id);
-      if (!existing) {
-        throw errors.notFound("Cluster");
+      const result = await clusters.terminate(req.params.id, req.user);
+      if (result.success) {
+        return res.json({ cluster: result.data, message: result.message });
       }
-
-      if (existing.status === "terminated") {
-        throw errors.badRequest("Cluster is already terminated");
-      }
-
-      const cluster = await clusters.terminate(id);
-      res.json({ cluster, message: "Cluster terminated" });
+      handleResult(result, res);
     }),
   );
 
@@ -196,28 +133,37 @@ function createClusterRoutes(repositories) {
   router.post(
     "/:id/scale",
     authenticateToken,
-    requireRole("admin"),
     schemas.clusters.getById,
     asyncHandler(async (req, res) => {
-      const { id } = req.params;
       const { num_workers } = req.body;
-
-      if (!num_workers || num_workers < 1 || num_workers > 100) {
-        throw errors.badRequest("num_workers must be between 1 and 100");
+      const result = await clusters.scale(req.params.id, num_workers, req.user);
+      if (result.success) {
+        return res.json({ cluster: result.data, message: result.message });
       }
-
-      const existing = await clusters.findById(id);
-      if (!existing) {
-        throw errors.notFound("Cluster");
-      }
-
-      const cluster = await clusters.scale(id, num_workers);
-      res.json({
-        cluster,
-        message: `Cluster scaled to ${num_workers} workers`,
-      });
+      handleResult(result, res);
     }),
   );
+
+  /**
+   * DELETE /clusters/:id - Delete cluster (admin only)
+   */
+  router.delete(
+    "/:id",
+    authenticateToken,
+    schemas.clusters.getById,
+    asyncHandler(async (req, res) => {
+      const result = await clusters.delete(req.params.id, req.user);
+      if (result.success) {
+        return res.json({ message: "Cluster deleted successfully" });
+      }
+      handleResult(result, res);
+    }),
+  );
+
+  return router;
+}
+
+module.exports = { createClusterRoutes };
 
   /**
    * DELETE /clusters/:id - Delete cluster (admin only)

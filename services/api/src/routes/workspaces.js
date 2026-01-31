@@ -1,31 +1,36 @@
 /**
  * Workspace Routes
  * RESTful endpoints for workspace management
+ * Routes are thin adapters that delegate to WorkspaceService
  */
 
 const express = require("express");
-const { asyncHandler, errors } = require("../utils/errors");
+const { asyncHandler } = require("../utils/errors");
+const { handleResult } = require("../utils/routeHelpers");
 const schemas = require("../schemas");
 const { authenticateToken } = require("../middleware/auth");
 
 /**
  * Create workspace router
- * @param {Object} repositories - Repository instances
+ * @param {Object} services - Service instances
  * @returns {express.Router} Configured router
  */
-function createWorkspaceRoutes(repositories) {
+function createWorkspaceRoutes(services) {
   const router = express.Router();
-  const { workspaces } = repositories;
+  const { workspaces } = services;
 
   /**
    * GET /workspaces - List workspaces
-   * Users see their own workspaces, admins see all
    */
   router.get(
     "/",
     authenticateToken,
     asyncHandler(async (req, res) => {
-      const result = await workspaces.findForUser(req.user);
+      const { limit, offset } = req.query;
+      const result = await workspaces.list(req.user, {
+        limit: limit ? parseInt(limit, 10) : undefined,
+        offset: offset ? parseInt(offset, 10) : undefined,
+      });
       res.json({ workspaces: result });
     }),
   );
@@ -38,17 +43,8 @@ function createWorkspaceRoutes(repositories) {
     authenticateToken,
     schemas.workspaces.getById,
     asyncHandler(async (req, res) => {
-      const workspace = await workspaces.findByIdWithStats(req.params.id);
-
-      if (!workspace) {
-        throw errors.notFound("Workspace");
-      }
-
-      if (!(await workspaces.canAccess(workspace.id, req.user))) {
-        throw errors.forbidden("You do not have access to this workspace");
-      }
-
-      res.json({ workspace });
+      const result = await workspaces.getById(req.params.id, req.user);
+      handleResult(result, res, { dataKey: "workspace" });
     }),
   );
 
@@ -60,15 +56,8 @@ function createWorkspaceRoutes(repositories) {
     authenticateToken,
     schemas.workspaces.create,
     asyncHandler(async (req, res) => {
-      const { name, description } = req.body;
-
-      const workspace = await workspaces.create({
-        name,
-        description,
-        owner_id: req.user.id,
-      });
-
-      res.status(201).json({ workspace });
+      const result = await workspaces.create(req.body, req.user);
+      handleResult(result, res, { successStatus: 201, dataKey: "workspace" });
     }),
   );
 
@@ -80,27 +69,8 @@ function createWorkspaceRoutes(repositories) {
     authenticateToken,
     schemas.workspaces.update,
     asyncHandler(async (req, res) => {
-      const { id } = req.params;
-      const { name, description } = req.body;
-
-      const existing = await workspaces.findById(id);
-      if (!existing) {
-        throw errors.notFound("Workspace");
-      }
-
-      if (!(await workspaces.canAccess(id, req.user))) {
-        throw errors.forbidden(
-          "You do not have permission to update this workspace",
-        );
-      }
-
-      // Build update object with only provided fields
-      const updates = {};
-      if (name !== undefined) updates.name = name;
-      if (description !== undefined) updates.description = description;
-
-      const workspace = await workspaces.update(id, updates);
-      res.json({ workspace });
+      const result = await workspaces.update(req.params.id, req.body, req.user);
+      handleResult(result, res, { dataKey: "workspace" });
     }),
   );
 
@@ -112,21 +82,11 @@ function createWorkspaceRoutes(repositories) {
     authenticateToken,
     schemas.workspaces.getById,
     asyncHandler(async (req, res) => {
-      const { id } = req.params;
-
-      const existing = await workspaces.findById(id);
-      if (!existing) {
-        throw errors.notFound("Workspace");
+      const result = await workspaces.delete(req.params.id, req.user);
+      if (result.success) {
+        return res.json({ message: "Workspace deleted successfully" });
       }
-
-      if (!(await workspaces.canAccess(id, req.user))) {
-        throw errors.forbidden(
-          "You do not have permission to delete this workspace",
-        );
-      }
-
-      await workspaces.delete(id);
-      res.json({ message: "Workspace deleted successfully" });
+      handleResult(result, res);
     }),
   );
 

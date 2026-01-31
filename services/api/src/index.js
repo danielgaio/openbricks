@@ -4,6 +4,7 @@
  *
  * Architecture:
  * - Repository Pattern for data access abstraction
+ * - Service Layer for business logic (Clean Architecture Use Cases)
  * - Modular route handlers with dependency injection
  * - Centralized error handling and validation
  */
@@ -21,6 +22,9 @@ const { errorHandler, notFoundHandler } = require("./utils/errors");
 
 // Repositories - data access layer
 const { createRepositories } = require("./repositories");
+
+// Services - business logic layer
+const { createServices } = require("./services");
 
 // Routes - modular route handlers
 const {
@@ -92,6 +96,12 @@ const pool = new Pool({
 // Initialize repositories with database pool
 const repositories = createRepositories(pool);
 
+// Initialize services with repositories and dependencies
+const services = createServices(repositories, {
+  logger,
+  pool, // For audit service direct queries
+});
+
 // Health check endpoint
 app.get("/health", async (req, res) => {
   try {
@@ -140,12 +150,13 @@ const apiRouter = express.Router();
 // Mount Modular Route Handlers
 // ============================================
 
-// Mount domain routes with repository injection
-apiRouter.use("/workspaces", createWorkspaceRoutes(repositories));
-apiRouter.use("/notebooks", createNotebookRoutes(repositories));
-apiRouter.use("/jobs", createJobRoutes(repositories));
-apiRouter.use("/clusters", createClusterRoutes(repositories));
-apiRouter.use("/tables", createTableRoutes(repositories));
+// Mount domain routes with service injection (Clean Architecture)
+// Routes are thin adapters, services contain business logic
+apiRouter.use("/workspaces", createWorkspaceRoutes(services));
+apiRouter.use("/notebooks", createNotebookRoutes(services));
+apiRouter.use("/jobs", createJobRoutes(services));
+apiRouter.use("/clusters", createClusterRoutes(services));
+apiRouter.use("/tables", createTableRoutes(services));
 
 // ============================================
 // Mount Router & Error Handling
