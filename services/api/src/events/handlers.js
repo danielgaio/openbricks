@@ -9,6 +9,12 @@
 const { DomainEvents } = require("./DomainEvents");
 
 /**
+ * In-memory store for tracking active job runs
+ * Maps job_id to run_id for correlating job events with run records
+ */
+const activeJobRuns = new Map();
+
+/**
  * Create audit logging handler
  * Automatically logs all domain events to audit_logs table
  * @param {Object} pool - Database pool
@@ -106,6 +112,105 @@ function createMetricsHandler(logger) {
 }
 
 /**
+ * Create job run tracking handler
+ * Automatically creates and updates job run records based on job lifecycle events
+ * @param {Object} dependencies - { logger, jobRunService }
+ * @returns {Function} Event handler
+ */
+function createJobRunTrackingHandler(dependencies) {
+  const { logger, jobRunService } = dependencies;
+
+  if (!jobRunService) {
+    return async () => {}; // No-op if service not provided
+  }
+
+  return async (event) => {
+    const { type, payload, metadata } = event;
+    const { job, userId } = payload;
+
+    try {
+      switch (type) {
+        case DomainEvents.JOB_QUEUED: {
+          // Create a new run record when job is queued
+          if (!job?.id) break;
+
+          const run = await jobRunService.startRun(job.id, { userId });
+          activeJobRuns.set(job.id, run.id);
+
+          logger.info("Job run started:", {
+            jobId: job.id,
+            runId: run.id,
+          });
+          break;
+        }
+
+        case DomainEvents.JOB_COMPLETED: {
+          // Complete the active run
+          if (!job?.id) break;
+
+          const runId = activeJobRuns.get(job.id);
+          if (runId) {
+            await jobRunService.completeRun(runId, payload.output || null, {
+              userId,
+            });
+            activeJobRuns.delete(job.id);
+
+            logger.info("Job run completed:", {
+              jobId: job.id,
+              runId,
+            });
+          }
+          break;
+        }
+
+        case DomainEvents.JOB_FAILED: {
+          // Fail the active run with error message
+          if (!job?.id) break;
+
+          const runId = activeJobRuns.get(job.id);
+          if (runId) {
+            const errorMessage =
+              payload.error?.message || payload.errorMessage || "Unknown error";
+            await jobRunService.failRun(runId, errorMessage, { userId });
+            activeJobRuns.delete(job.id);
+
+            logger.info("Job run failed:", {
+              jobId: job.id,
+              runId,
+              error: errorMessage,
+            });
+          }
+          break;
+        }
+
+        case DomainEvents.JOB_CANCELLED: {
+          // Cancel the active run
+          if (!job?.id) break;
+
+          const runId = activeJobRuns.get(job.id);
+          if (runId) {
+            await jobRunService.cancelRun(runId, { userId });
+            activeJobRuns.delete(job.id);
+
+            logger.info("Job run cancelled:", {
+              jobId: job.id,
+              runId,
+            });
+          }
+          break;
+        }
+      }
+    } catch (error) {
+      logger.error("Job run tracking error:", {
+        event: type,
+        jobId: job?.id,
+        error: error.message,
+      });
+    }
+  };
+}
+
+/**
  * Create job execution handler
  * Handles job.queued events to trigger actual job execution
  * @param {Object} dependencies - { pool, logger, jobRunner }
@@ -141,10 +246,10 @@ function createJobExecutionHandler(dependencies) {
 /**
  * Register all event handlers on the event bus
  * @param {EventBus} eventBus - Event bus instance
- * @param {Object} dependencies - { pool, logger, jobRunner }
+ * @param {Object} dependencies - { pool, logger, jobRunner, jobRunService }
  */
 function registerHandlers(eventBus, dependencies) {
-  const { pool, logger, jobRunner } = dependencies;
+  const { pool, logger, jobRunner, jobRunService } = dependencies;
 
   // Register audit handler for ALL events (using wildcard)
   if (pool) {
@@ -162,6 +267,28 @@ function registerHandlers(eventBus, dependencies) {
   eventBus.on("*", createMetricsHandler(logger), {
     name: "MetricsHandler",
   });
+
+  // Register job run tracking handler for job lifecycle events
+  if (jobRunService) {
+    const jobRunTrackingHandler = createJobRunTrackingHandler({
+      logger,
+      jobRunService,
+    });
+
+    // Listen to all job lifecycle events that affect runs
+    eventBus.on(DomainEvents.JOB_QUEUED, jobRunTrackingHandler, {
+      name: "JobRunTrackingHandler",
+    });
+    eventBus.on(DomainEvents.JOB_COMPLETED, jobRunTrackingHandler, {
+      name: "JobRunTrackingHandler",
+    });
+    eventBus.on(DomainEvents.JOB_FAILED, jobRunTrackingHandler, {
+      name: "JobRunTrackingHandler",
+    });
+    eventBus.on(DomainEvents.JOB_CANCELLED, jobRunTrackingHandler, {
+      name: "JobRunTrackingHandler",
+    });
+  }
 
   // Register job execution handler
   if (jobRunner) {
@@ -214,6 +341,9 @@ module.exports = {
   createAuditHandler,
   createNotificationHandler,
   createMetricsHandler,
+  createJobRunTrackingHandler,
   createJobExecutionHandler,
   registerHandlers,
+  // Expose for testing
+  activeJobRuns,
 };

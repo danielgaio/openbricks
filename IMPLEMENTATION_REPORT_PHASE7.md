@@ -4,6 +4,8 @@
 
 Phase 7 implements **Job Run Tracking** - a system to record, track, and analyze individual job execution attempts. This fills an architectural gap where the `job_runs` database table existed but was unused.
 
+**Update (Phase 8):** Added automatic job run tracking via event handlers. Job runs are now created automatically when jobs are queued, completed, failed, or cancelled.
+
 ## Architectural Context
 
 ### Problem Identified

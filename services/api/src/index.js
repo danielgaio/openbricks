@@ -100,9 +100,6 @@ const pool = new Pool({
 // Initialize Event Bus for domain events
 const eventBus = createEventBus({ logger });
 
-// Register event handlers (audit, notifications, metrics)
-registerHandlers(eventBus, { pool, logger });
-
 // Initialize repositories with database pool
 const repositories = createRepositories(pool);
 
@@ -111,6 +108,14 @@ const services = createServices(repositories, {
   logger,
   pool, // For audit service direct queries
   eventBus, // For domain events
+});
+
+// Register event handlers (audit, notifications, metrics, job run tracking)
+// Must be after services are created so jobRunService is available
+registerHandlers(eventBus, {
+  pool,
+  logger,
+  jobRunService: services.jobRuns, // Enable automatic job run tracking
 });
 
 // Health check endpoint

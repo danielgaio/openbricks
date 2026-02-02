@@ -9,6 +9,10 @@ const {
   createEventBus,
   registerHandlers,
 } = require("../events");
+const {
+  createJobRunTrackingHandler,
+  activeJobRuns,
+} = require("../events/handlers");
 
 describe("Event-Driven Architecture", () => {
   let eventBus;
@@ -261,6 +265,142 @@ describe("Event-Driven Architecture", () => {
           expect.any(Array),
         );
       });
+    });
+  });
+
+  // ============================================
+  // JobRunTrackingHandler Tests
+  // ============================================
+  describe("JobRunTrackingHandler", () => {
+    let mockJobRunService;
+    let handler;
+
+    beforeEach(() => {
+      // Clear active job runs map
+      activeJobRuns.clear();
+
+      mockJobRunService = {
+        startRun: jest.fn().mockResolvedValue({ id: 100, job_id: 1 }),
+        completeRun: jest.fn().mockResolvedValue({ id: 100, status: "completed" }),
+        failRun: jest.fn().mockResolvedValue({ id: 100, status: "failed" }),
+        cancelRun: jest.fn().mockResolvedValue({ id: 100, status: "cancelled" }),
+      };
+
+      handler = createJobRunTrackingHandler({
+        logger: mockLogger,
+        jobRunService: mockJobRunService,
+      });
+    });
+
+    afterEach(() => {
+      activeJobRuns.clear();
+    });
+
+    it("should create a run record on JOB_QUEUED", async () => {
+      const event = {
+        type: DomainEvents.JOB_QUEUED,
+        payload: { job: { id: 1, name: "Test Job" }, userId: 42 },
+        metadata: {},
+      };
+
+      await handler(event);
+
+      expect(mockJobRunService.startRun).toHaveBeenCalledWith(1, { userId: 42 });
+      expect(activeJobRuns.get(1)).toBe(100);
+    });
+
+    it("should complete a run on JOB_COMPLETED", async () => {
+      // First, simulate a job being queued
+      activeJobRuns.set(1, 100);
+
+      const event = {
+        type: DomainEvents.JOB_COMPLETED,
+        payload: { job: { id: 1 }, userId: 42, output: "Success logs" },
+        metadata: {},
+      };
+
+      await handler(event);
+
+      expect(mockJobRunService.completeRun).toHaveBeenCalledWith(
+        100,
+        "Success logs",
+        { userId: 42 }
+      );
+      expect(activeJobRuns.has(1)).toBe(false);
+    });
+
+    it("should fail a run on JOB_FAILED with error message", async () => {
+      activeJobRuns.set(1, 100);
+
+      const event = {
+        type: DomainEvents.JOB_FAILED,
+        payload: {
+          job: { id: 1 },
+          userId: 42,
+          error: { message: "Execution timeout" },
+        },
+        metadata: {},
+      };
+
+      await handler(event);
+
+      expect(mockJobRunService.failRun).toHaveBeenCalledWith(
+        100,
+        "Execution timeout",
+        { userId: 42 }
+      );
+      expect(activeJobRuns.has(1)).toBe(false);
+    });
+
+    it("should cancel a run on JOB_CANCELLED", async () => {
+      activeJobRuns.set(1, 100);
+
+      const event = {
+        type: DomainEvents.JOB_CANCELLED,
+        payload: { job: { id: 1 }, userId: 42 },
+        metadata: {},
+      };
+
+      await handler(event);
+
+      expect(mockJobRunService.cancelRun).toHaveBeenCalledWith(100, { userId: 42 });
+      expect(activeJobRuns.has(1)).toBe(false);
+    });
+
+    it("should ignore events without job in payload", async () => {
+      const event = {
+        type: DomainEvents.JOB_QUEUED,
+        payload: { userId: 42 }, // No job
+        metadata: {},
+      };
+
+      await handler(event);
+
+      expect(mockJobRunService.startRun).not.toHaveBeenCalled();
+    });
+
+    it("should handle errors gracefully", async () => {
+      mockJobRunService.startRun.mockRejectedValue(new Error("DB error"));
+
+      const event = {
+        type: DomainEvents.JOB_QUEUED,
+        payload: { job: { id: 1 }, userId: 42 },
+        metadata: {},
+      };
+
+      // Should not throw
+      await expect(handler(event)).resolves.not.toThrow();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        "Job run tracking error:",
+        expect.objectContaining({ error: "DB error" })
+      );
+    });
+
+    it("should return no-op handler when jobRunService not provided", () => {
+      const noopHandler = createJobRunTrackingHandler({ logger: mockLogger });
+
+      // Handler should be a function that does nothing
+      expect(typeof noopHandler).toBe("function");
     });
   });
 
